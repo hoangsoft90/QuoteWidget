@@ -276,7 +276,7 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
     return ReorderableListView.builder(
       padding: const EdgeInsets.all(8),
       itemCount: _items.length,
-      onReorderItem: (int fromIndex, int toIndex) {
+      onReorder: (int fromIndex, int toIndex) {
         if (fromIndex < toIndex) {
           toIndex -= 1;
         }
