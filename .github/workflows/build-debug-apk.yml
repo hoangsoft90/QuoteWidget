@@ -22,7 +22,7 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.29.3'
+          flutter-version: '3.32.4'
           channel: 'stable'
 
       - name: Verify Flutter & Dart versions
@@ -30,8 +30,10 @@ jobs:
           flutter --version
           dart --version
 
-      - name: Install dependencies
-        run: flutter pub get
+      - name: Delete stale pubspec.lock and re-resolve
+        run: |
+          rm -f pubspec.lock
+          flutter pub get
 
       - name: Run tests
         run: flutter test --no-pub || true
@@ -44,8 +46,6 @@ jobs:
 
       - name: Verify APK exists
         run: |
-          ls -lh app/build/outputs/flutter-apk/app-debug.apk 2>/dev/null || \
-          ls -lh app/build/outputs/apk/debug/app-debug.apk 2>/dev/null || \
           find app/build/outputs -name "*.apk" -type f
 
       - name: Upload debug APK artifact

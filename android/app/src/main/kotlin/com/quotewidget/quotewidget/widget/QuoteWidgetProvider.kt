@@ -7,7 +7,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.widget.RemoteViews
-import android.preference.PreferenceManager
 import com.quotewidget.quotewidget.R
 
 class QuoteWidgetProvider : AppWidgetProvider() {
