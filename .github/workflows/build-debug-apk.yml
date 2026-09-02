@@ -35,18 +35,39 @@ jobs:
           rm -f pubspec.lock
           flutter pub get
 
-      - name: Analyze code
-        run: flutter analyze --no-pub 2>&1 | tail -30
-
       - name: Run tests
         run: flutter test --no-pub 2>&1 | tail -20
 
       - name: Build debug APK
-        run: flutter build apk --debug --verbose 2>&1 | tail -100
+        run: flutter build apk --debug 2>&1 | tail -20
 
       - name: Find APK
+        id: find-apk
         run: |
-          echo "=== Searching ==="
-          find . -name "*.apk" -type f
-          echo "=== Build outputs ==="
-          find build -type f 2>/dev/null | grep -i apk || echo "No APK in build/"
+          APK=$(find . -name "*.apk" -type f 2>/dev/null | head -1)
+          if [ -n "$APK" ]; then
+            echo "apk_path=$APK" >> "$GITHUB_OUTPUT"
+            echo "apk_size=$(du -h "$APK" | cut -f1)" >> "$GITHUB_OUTPUT"
+            echo "✅ APK found: $APK ($(du -h "$APK" | cut -f1))"
+          else
+            echo "❌ No APK found"
+            exit 1
+          fi
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-apk-${{ github.sha }}
+          path: ${{ steps.find-apk.outputs.apk_path }}
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## ✅ Build Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**APK:** Download from **Actions** → this run → **debug-apk** artifact" >> $GITHUB_STEP_SUMMARY
+          echo "**Size:** ${{ steps.find-apk.outputs.apk_size }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY

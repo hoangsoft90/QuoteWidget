@@ -83,9 +83,10 @@ for a in d.get('artifacts', []):
 
 - **Flutter version:** 3.32.4 stable
 - **Java:** Temurin JDK 17
-- **Build command:** `./gradlew assembleDebug --no-daemon` (Gradle 9.3.1, AGP 9.1.0)
-- **Output:** `app/build/outputs/flutter-apk/app-debug.apk`
+- **Build command:** `flutter build apk --debug`
+- **Output:** `build/app/outputs/flutter-apk/app-debug.apk`
 - **Artifacts:** Retained for 7 days
+- **Dart SDK:** ^3.8.0 (must match Flutter 3.32.4)
 
 ## Important Notes
 
