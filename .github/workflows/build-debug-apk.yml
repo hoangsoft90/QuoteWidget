@@ -39,13 +39,26 @@ jobs:
         run: flutter test --no-pub 2>&1 | tail -10
 
       - name: Build debug APK
+        id: build
+        continue-on-error: true
         working-directory: android
         run: |
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon 2>&1 | tee ../build-output.txt
-          EXIT_CODE=${PIPESTATUS[0]}
-          echo "GRADLE_EXIT=$EXIT_CODE" >> ../build-output.txt
-          exit $EXIT_CODE
+          echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+
+      - name: Show build output
+        if: always()
+        run: |
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          tail -150 build-output.txt 2>/dev/null >> $GITHUB_STEP_SUMMARY || echo "No build output found" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Fail if build failed
+        if: steps.build.outputs.exit_code != '0'
+        run: |
+          echo "Build failed with exit code ${{ steps.build.outputs.exit_code }}"
+          exit 1
 
       - name: Upload build log
         if: always()
@@ -55,8 +68,18 @@ jobs:
           path: build-output.txt
           if-no-files-found: warn
 
-      - name: Upload APK
-        if: success()
+      - name: Find and upload APK
+        if: steps.build.outputs.exit_code == '0'
+        run: |
+          APK=$(find app/build -name "*.apk" -type f 2>/dev/null | head -1)
+          echo "APK=$APK" >> "$GITHUB_OUTPUT"
+          if [ -n "$APK" ]; then
+            echo "## ✅ APK Built" >> $GITHUB_STEP_SUMMARY
+            echo "Path: \`$APK\` ($(du -h "$APK" | cut -f1))" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload APK artifact
+        if: steps.build.outputs.exit_code == '0'
         uses: actions/upload-artifact@v4
         with:
           name: debug-apk
