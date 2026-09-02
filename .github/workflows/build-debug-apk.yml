@@ -42,21 +42,19 @@ jobs:
         working-directory: android
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee ../build-output.txt
-          echo "GRADLE_EXIT=$?" >> ../build-output.txt
+          ./gradlew assembleDebug --no-daemon 2>&1 | tee ../build-output.txt
+          EXIT_CODE=${PIPESTATUS[0]}
+          echo "GRADLE_EXIT=$EXIT_CODE" >> ../build-output.txt
+          exit $EXIT_CODE
 
-      - name: Debug output
+      - name: Show build output
         if: always()
         run: |
-          echo "=== Last 200 lines ==="
-          tail -200 build-output.txt 2>/dev/null || echo "No output"
-          echo "=== APK search ==="
-          find . -name "*.apk" -type f 2>/dev/null || echo "No APK"
-          echo "=== build tree ==="
-          find app/build -type f -name "*.apk" 2>/dev/null || echo "No APK in app/build/"
-          find build -type f -name "*.apk" 2>/dev/null || echo "No APK in build/"
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          tail -120 build-output.txt 2>/dev/null >> $GITHUB_STEP_SUMMARY || echo "No output captured" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
 
-      - name: Summary
+      - name: Find APK
         if: always()
         run: |
           APK=$(find . -name "*.apk" -type f 2>/dev/null | head -1)
@@ -64,9 +62,14 @@ jobs:
             echo "## ✅ APK Built" >> $GITHUB_STEP_SUMMARY
             echo "Path: \`$APK\` ($(du -h "$APK" | cut -f1))" >> $GITHUB_STEP_SUMMARY
           else
-            echo "## ❌ Build Failed" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            tail -80 build-output.txt 2>/dev/null >> $GITHUB_STEP_SUMMARY || echo "No output" >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "## ❌ No APK found" >> $GITHUB_STEP_SUMMARY
           fi
+
+      - name: Upload APK artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-apk
+          path: |
+            **/*.apk
+          if-no-files-found: warn
