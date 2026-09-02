@@ -83,10 +83,11 @@ for a in d.get('artifacts', []):
 
 - **Flutter version:** 3.32.4 stable
 - **Java:** Temurin JDK 17
-- **Build command:** `flutter build apk --debug`
-- **Output:** `build/app/outputs/flutter-apk/app-debug.apk`
+- **Build command:** `./gradlew assembleDebug` (Gradle direct, NOT `flutter build apk`)
+- **APK output:** `android/app/build/outputs/apk/debug/app-debug.apk`
 - **Artifacts:** Retained for 7 days
 - **Dart SDK:** ^3.8.0 (must match Flutter 3.32.4)
+- **No `workmanager`** — removed because v0.5.2 incompatible with Flutter 3.32
 
 ## Important Notes
 
@@ -109,4 +110,10 @@ for a in d.get('artifacts', []):
 
 ### APK not found in artifacts
 - Check workflow logs at the Actions tab
-- Look for `find app/build/outputs -name "*.apk"` in the workflow output
+- APK path: `android/app/build/outputs/apk/debug/app-debug.apk` (NOT `build/app/outputs/flutter-apk/`)
+- `if-no-files-found: warn` means upload won't fail but will be empty if path is wrong
+
+### workmanager build error
+- `workmanager` v0.5.2 is incompatible with Flutter 3.32.4
+- It's only used for P1 (Daily Reset), not in active code
+- Remove from `pubspec.yaml` to fix build
