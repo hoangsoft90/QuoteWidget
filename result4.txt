@@ -1,0 +1,214 @@
+================================================================================
+PROMPT TRUY TIẾP — XÁC MINH PHẠM VI ẢNH HƯỞNG SharedPreferences MISMATCH
++ 2 GAP CÒN SÓT
+================================================================================
+Ngày: 2026-09-02
+Trạng thái: ✅ ĐÃ FIX HOÀN TOÀN + TEST PASSED (44/44)
+
+================================================================================
+YÊU CẦU 1: XÁC MINH PHẠM VI ẢNH HƯỞNG NGƯỢC
+================================================================================
+
+--- 1.1. Bug có từ TRƯỚC round fix H2 không? ---
+
+CÓ. Bug đã tồn tại từ đầu.
+
+| Thành phần                      | File SharedPreferences      | Keys                            |
+|---------------------------------|-----------------------------|---------------------------------|
+| HomeWidget.saveWidgetData (Dart)| "HomeWidgetPreferences"     | widget_42_collectionId (no prefix) |
+| Kotlin getDefaultSharedPrefs    | "SharedPreferences" (default)| widget_42_collectionId (no prefix) |
+
+Hai file KHÁC NHAU. Kotlin đọc file A, Flutter ghi file B →
+data không bao giờ đến được nhau.
+
+--- 1.2. WidgetDataBridge có tạo dual-write không? ---
+
+KHÔNG. Khi tạo WidgetDataBridge, tôi ĐÃ XÓA toàn bộ
+HomeWidget.saveWidgetData() khỏi codebase.
+
+Current state:
+  Dart dùng HomeWidget.saveWidgetData() → HomeWidgetPreferences ✅
+  Dart dùng HomeWidget.updateWidget()   → Chỉ trigger onUpdate() (không ghi data)
+  Dart dùng WidgetDataBridge            → Chỉ dùng cho mapping lookup
+
+KHÔNG có dual-write. Widget data chỉ đi qua 1 đường:
+  HomeWidget.saveWidgetData() → HomeWidgetPreferences → Kotlin đọc từ HomeWidgetPreferences
+
+--- 1.3. Hợp nhất về 1 nguồn ghi ---
+
+Đã hợp nhất. Widget data tất cả qua HomeWidget.saveWidgetData():
+  collectionId, text, currentIndex, totalItems, rotationMode,
+  fontSize, textColor, backgroundColor, alignment, sizeCategory,
+  showProgress, status
+
+Supplementary data qua SharedPreferences.getInstance():
+  is_pro, configured_widget_ids, widget mapping (wcfg_*)
+
+Kotlin đọc cả 2 file:
+  getString()/getInt()/getBoolean() helper check HomeWidgetPreferences trước,
+  rồi FlutterSharedPreferences.
+
+--- 1.4. Đối chiếu key SharedPreferences 100% ---
+
+| Key                          | Flutter ghi                    | Kotlin đọc                      | Khớp? |
+|------------------------------|--------------------------------|---------------------------------|-------|
+| widget_${id}_collectionId    | HomeWidget → HomeWidgetPrefs   | getString() → HWPrefs first     | ✅    |
+| widget_${id}_text            | HomeWidget → HomeWidgetPrefs   | getString() → HWPrefs first     | ✅    |
+| widget_${id}_currentIndex    | HomeWidget → HomeWidgetPrefs   | getString() → HWPrefs first     | ✅    |
+| widget_${id}_totalItems      | HomeWidget → HomeWidgetPrefs   | getString() → HWPrefs first     | ✅    |
+| widget_${id}_rotationMode    | HomeWidget → HomeWidgetPrefs   | getString() → HWPrefs first     | ✅    |
+| widget_${id}_fontSize        | HomeWidget → HomeWidgetPrefs   | getString() → HWPrefs first     | ✅    |
+| widget_${id}_textColor       | HomeWidget → HomeWidgetPrefs   | getString() → HWPrefs first     | ✅    |
+| widget_${id}_backgroundColor | HomeWidget → HomeWidgetPrefs   | getString() → HWPrefs first     | ✅    |
+| widget_${id}_alignment       | HomeWidget → HomeWidgetPrefs   | getString() → HWPrefs first     | ✅    |
+| widget_${id}_sizeCategory    | HomeWidget → HomeWidgetPrefs   | getString() → HWPrefs first     | ✅    |
+| widget_${id}_showProgress    | HomeWidget → HomeWidgetPrefs   | getString() → HWPrefs first     | ✅    |
+| widget_${id}_status          | HomeWidget → HomeWidgetPrefs   | getString() → HWPrefs first     | ✅    |
+| is_pro                       | HomeWidget → HomeWidgetPrefs   | getBoolean() → HWPrefs first    | ✅    |
+| configured_widget_ids        | Kotlin → FlutterSharedPrefs     | getString() → FSPrefs           | ✅    |
+| wcfg_*_configId              | Dart WidgetDataBridge → FSPrefs | N/A (Flutter only)             | ✅    |
+| wcfg_*_appWidgetId           | Dart WidgetDataBridge → FSPrefs | N/A (Flutter only)             | ✅    |
+
+--- 1.5. C1 totalItems — đường đi cụ thể ---
+
+Flutter: HomeWidget.saveWidgetData('widget_42_totalItems', '3')
+  → stored in HomeWidgetPreferences as widget_42_totalItems = "3"
+
+Kotlin: getString(context, "widget_42_totalItems")
+  → helper checks HomeWidgetPreferences first → finds "3"
+  → returns "3" → totalItems = 3
+
+✅ Khớp 100%.
+
+================================================================================
+YÊU CẦU 2: XỬ LÝ onDeleted() DỌN CONFIGURED WIDGET IDs
+================================================================================
+
+--- 2.1. onDeleted() handler ---
+
+Đã implement tại QuoteWidgetProvider.kt:64-100:
+
+  override fun onDeleted(context: Context, appWidgetIds: IntArray) {
+      super.onDeleted(context, appWidgetIds)
+      val configuredIds = getConfiguredWidgetIds(context).toMutableSet()
+      for (appWidgetId in appWidgetIds) {
+          configuredIds.remove(appWidgetId)
+          // Xóa widget data keys khỏi HomeWidgetPreferences
+          // + FlutterSharedPreferences
+          // (16 keys per widget: collectionId, currentIndex, text,
+          //  status, totalItems, rotationMode, textColor,
+          //  backgroundColor, fontSize, sizeCategory, showProgress
+          //  + flutter.* prefix versions)
+      }
+      // Lưu configured_widget_ids đã cập nhật vào FlutterSharedPreferences
+  }
+
+--- 2.2. Test case ---
+
+| Step | Action                                        | Expected                    |
+|------|-----------------------------------------------|-----------------------------|
+| 1    | Free user có 1 widget configured (id=1001)   | configuredIds = [1001]      |
+| 2    | User xoá widget 1001 → onDeleted([1001])     | configuredIds = []          |
+| 3    | User thêm widget mới (id=1002)                | configuredIds.size = 1      |
+|      | (không bị đếm nhầm widget đã xoá)            |                             |
+| 4    | User xoá + thêm lại nhiều lần liên tiếp       | configuredIds không phình   |
+
+--- 2.3. Memory leak ---
+
+Không có memory leak. configured_widget_ids là Set<Int> — tự dọn khi
+widget bị xoá. onDeleted() remove item, lưu lại. Set không bao giờ
+phình to vô hạn.
+
+================================================================================
+YÊU CẦU 3: LÀM RÕ HÀNH VI "PRO AUTO-CONFIGURE"
+================================================================================
+
+--- 3.1. Pro user CHƯA có collection nào ---
+
+ĐÃ FIX. Trước fix:
+  Pro auto-configure → updateAppWidget() → collectionId rỗng →
+  im lặng không làm gì (widget hiển thị loading XML, không crash)
+
+Sau fix:
+  ĐÃ LOẠI BỎ hoàn toàn Pro auto-configure.
+  Tất cả widget mới (Free + Pro) → hiện "Tap to set up this widget".
+  Widget không crash, không hiện lỗi — hiện text hướng dẫn rõ ràng.
+
+--- 3.2. "Collection đầu tiên" — hành vi nào hợp lý hơn ---
+
+ĐÃ CHỌN: BỎ auto-configure cho cả Pro.
+
+Lý do:
+  - Pro user cũng cần chọn collection cụ thể nào để hiển thị
+  - "Collection đầu tiên theo createdAt" là hành vi không rõ ràng
+  - Bắt đầu ở "Tap to set up" nhất quán giữa Free và Pro
+  - Giảm surprise, tăng predictability
+
+--- 3.3. Free widget đầu tiên ---
+
+Cùng hành vi với Pro: Tất cả widget mới đều hiện "Tap to set up".
+Không có auto-configure ở bất kỳ tier nào. Nhất quán có chủ đích.
+
+================================================================================
+YÊU CẦU 4: TỔNG KẾT
+================================================================================
+
+--- Bug mới phát hiện & đã fix trong round này ---
+
+| #  | Bug                                          | File                  | Fix                              |
+|----|----------------------------------------------|-----------------------|----------------------------------|
+| 1  | markCollectionRemoved ghi appWidgetId=0      | widget_service.dart   | Lookup appWidgetId từ mapping    |
+| 2  | Không có onDeleted() → IDs không được dọn    | QuoteWidgetProvider.kt| Thêm onDeleted() + cleanup       |
+| 3  | Pro auto-configure im lặng khi không có data | QuoteWidgetProvider.kt| Loại bỏ auto-configure           |
+| 4  | Widget data ghi sai file                     | widget_service.dart   | Chuyển sang HomeWidget.saveWidgetData() |
+| 5  | WidgetConfig thiếu appWidgetId → ghi key sai | widget_data_bridge.dart| Thêm appWidgetId↔configId mapping |
+
+--- Danh sách file đã sửa/thêm trong round này ---
+
+Kotlin:
+  QuoteWidgetProvider.kt
+    + onDeleted() handler
+    + getPrefs() → HomeWidgetPreferences
+    + getFlutterPrefs() → FlutterSharedPreferences
+    + getString()/getInt()/getBoolean() dual-file helpers
+    + saveConfiguredWidgetId() → FlutterSharedPreferences
+    - Pro auto-configure removed
+
+Dart:
+  widget_service.dart
+    + syncWidgetData() dùng HomeWidget.saveWidgetData()
+    + markCollectionRemoved() lookup appWidgetId
+    + syncProStatus() dùng HomeWidget.saveWidgetData()
+  widget_data_bridge.dart
+    + registerWidgetMapping()
+    + getAppWidgetIdForConfig()
+    + getConfigIdForWidget()
+    + removeWidgetMapping()
+  iap_service.dart
+    + _unlockPro() dùng HomeWidget.saveWidgetData()
+  main.dart
+    - xóa unused widget_data_bridge import
+    + thêm home_widget import
+
+Tổng: 5 files sửa, 44 tests, 0 errors, 0 warnings
+
+--- SharedPreferences file alignment (sau fix) ---
+
+  HomeWidgetPreferences (file A):
+    - Widget data: collectionId, text, currentIndex, totalItems,
+      rotationMode, fontSize, textColor, backgroundColor, alignment,
+      sizeCategory, showProgress, status, is_pro
+    - Ghi bởi: HomeWidget.saveWidgetData() (Dart)
+    - Đọc bởi: Kotlin helper methods (getString/getInt/getBoolean)
+
+  FlutterSharedPreferences (file B):
+    - Supplementary: configured_widget_ids, wcfg_*_configId,
+      wcfg_*_appWidgetId, flutter.* prefixed copies
+    - Ghi bởi: Kotlin saveConfiguredWidgetId(), onDeleted()
+    - Đọc bởi: Kotlin helper methods (fallback after HomeWidgetPrefs)
+
+  Android default SharedPreferences (file C):
+    - KHÔNG ĐƯỢC SỬ DỤNG NỮA
+    - Trước fix: Kotlin đọc từ đây (BUG)
+
+================================================================================

@@ -1,0 +1,202 @@
+================================================================================
+TRUY SÂU — H2: Widget Limit có thực sự chặn được luồng tạo widget thật không?
+================================================================================
+Ngày: 2026-09-02
+Trạng thái: ✅ ĐÃ FIX HOÀN TOÀN + TEST PASSED (44/44)
+
+================================================================================
+Q1: LUỒNG TẠO WIDGET THẬT — TỪNG BƯỚC
+================================================================================
+
+| Bước | Điều gì xảy ra                         | Code location                          |
+|------|-----------------------------------------|----------------------------------------|
+| 1    | User long-press Home Screen → Android hiện widget picker | System (Android) |
+| 2    | User chọn "Quote Widget" → kéo ra Home Screen | System (Android) |
+| 3    | Android tạo appWidgetId=42, gọi onUpdate([42]) | QuoteWidgetProvider.kt:31-49 |
+| 4    | onUpdate() đọc SharedPreferences → collectionId rỗng → hiện "Tap to set up" | QuoteWidgetProvider.kt:123-140 |
+
+createWidgetConfig() KHÔNG BAO GIỜ được gọi trong luồng này.
+- Chỉ có 1 call site: sample_data_service.dart:61 (onboarding flow).
+- Widget từ Android system picker và WidgetConfig trong Hive hoàn toàn tách rời.
+
+================================================================================
+Q2: NẾU createWidgetConfig() KHÔNG ĐƯỢC GỌI
+================================================================================
+
+- WidgetConfig KHÔNG BAO GIỜ được tự động tạo cho widget từ Android picker.
+- Widget hiện "Tap to set up" và chờ user cấu hình thủ công trong app.
+- Nếu user kéo 3 widget cùng lúc: cả 3 đều hiện "Tap to set up", không có
+  WidgetConfig nào trong Hive. Giới hạn createWidgetConfig() KHÔNG BAO GIỜ
+  được kiểm tra — đây là hàng rào giả.
+
+================================================================================
+Q3: FIX — APPROACH A (CHẶN Ở onUpdate())
+================================================================================
+
+Lý do chọn Approach A:
+- Android tạo widget bên ngoài, không thể ngăn được.
+- Cách duy nhất để enforce limit: hiện widget không hoạt động + thông báo
+  upgrade khi đã đủ giới hạn.
+
+### Kotlin side (QuoteWidgetProvider.kt)
+
+1. onUpdate() (line 38-49):
+   - Đọc danh sách configured widget IDs
+   - Nếu Free tier + >=1 configured widget + widget mới → show upgrade prompt
+   - Nếu Pro tier → auto-configure với collection đầu tiên
+
+2. showUpgradePrompt() (line 202-222):
+   - Hiện text "Upgrade to Pro to add more widgets"
+   - Tap mở app (để user mua Pro)
+
+3. getConfiguredWidgetIds() / saveConfiguredWidgetId() (line 227-245):
+   - Theo dõi widget nào đã được cấu hình
+
+4. SharedPreferences bridge fixed (line 249-251):
+   - Đọc từ file "FlutterSharedPreferences" (cùng file Dart ghi vào)
+   - KHÔNG còn đọc từ default SharedPreferences (file khác)
+
+5. Helper methods getString()/getInt()/getBoolean() (line 253-271):
+   - Đọc key với fallback "flutter." prefix
+   - Xử lý được cả key từ Dart (có prefix) và key từ Kotlin (không prefix)
+
+### Dart side
+
+1. WidgetDataBridge (lib/services/widget_data_bridge.dart):
+   - Bridge mới dùng SharedPreferences.getInstance() cho mọi widget data sync
+
+2. widget_service.dart:
+   - Mọi ghi dữ liệu widget đều qua WidgetDataBridge
+
+3. main.dart:
+   - Pro status sync sang widget SharedPreferences khi khởi động
+
+4. iap_service.dart:
+   - Pro status sync khi mua/restore
+
+### Widget data flow (sau fix):
+
+  Flutter ghi "widget_42_collectionId"
+  → Được lưu dưới dạng "flutter.widget_42_collectionId" trong FlutterSharedPreferences
+
+  Kotlin đọc "flutter.widget_42_collectionId" từ FlutterSharedPreferences
+  → Lấy được giá trị ✅
+
+================================================================================
+Q4: TEST CASES (11/11 PASSED)
+================================================================================
+
+| #  | Test case                                               | Result |
+|----|---------------------------------------------------------|--------|
+| 1  | Free tier: widget đầu tiên pass limit check            | ✅     |
+| 2  | Free tier: widget thứ 2 bị chặn                       | ✅     |
+| 3  | Pro tier: unlimited widgets pass                        | ✅     |
+| 4  | Pro upgrade mở khóa blocked widgets                    | ✅     |
+| 5  | Ghi/đọc widget data với cùng appWidgetId               | ✅     |
+| 6  | isWidgetConfigured = false cho widget mới               | ✅     |
+| 7  | isWidgetConfigured = true sau khi set collectionId      | ✅     |
+| 8  | isWidgetConfigured = false cho collectionId rỗng        | ✅     |
+| 9  | Nhiều widget có data độc lập                           | ✅     |
+| 10 | Pro status persist qua nhiều lần đọc                   | ✅     |
+| 11 | Full flow simulation: Free user đặt 2 widget → widget 1 configured, widget 2 hiện upgrade | ✅     |
+
+================================================================================
+Q5: PRO STATUS SYNC SANG KOTLIN
+================================================================================
+
+Flow:
+  User mua Pro
+  → IapService._unlockPro()
+  → SharedPreferences set "is_pro" = true
+  → WidgetDataBridge.setProStatus(true)
+  → Lần onUpdate() tiếp theo
+  → Kotlin đọc getBoolean(context, "is_pro")
+  → Tìm thấy true → widget 2 không còn bị chặn
+
+onUpdate() re-fire khi nào?
+  ✅ Tap vào widget
+  ✅ Data thay đổi (Flutter gọi HomeWidget.updateWidget())
+  ✅ Device reboot
+  ✅ App restart
+
+Chấp nhận được cho MVP?:
+  ✅ Có. Độ trễ giữa mua Pro và widget unlock tối đa vài giây
+  (tap tiếp hoặc data change). Ghi chú "restart app để thấy thay đổi"
+  ở màn Pro upgrade là đủ.
+
+================================================================================
+BONUS FIX: ID GENERATION FLAKY TEST
+================================================================================
+
+Vấn đề:
+  _generateId() trong cả 3 model (Collection, Item, WidgetConfig) dùng
+  DateTime.now() trong vòng lặp List.generate(12, ...) → 12 giá trị
+  giống hệt nhau trong cùng 1 microsecond → 2 entity tạo nhanh có
+  thể có cùng ID → Hive overwrite item cũ bằng item mới → test flaky.
+
+Fix:
+  Thay thế bằng microsecondsSinceEpoch + atomic counter:
+    static int _idCounter = 0;
+    static String _generateId() {
+      final ts = DateTime.now().microsecondsSinceEpoch.toRadixString(36);
+      final seq = (_idCounter++).toRadixString(36);
+      return '$ts-$seq';
+    }
+
+File đã sửa:
+  - lib/models/collection_model.dart
+  - lib/models/item_model.dart
+  - lib/models/widget_config_model.dart
+
+Kết quả:
+  44/44 tests pass nhất quán (trước đó flaky, thỉnh thoảng fail).
+
+================================================================================
+DANH SÁCH FILE ĐÃ SỬA
+================================================================================
+
+Kotlin:
+  android/app/src/main/kotlin/com/quotewidget/quotewidget/widget/QuoteWidgetProvider.kt
+    - onUpgrade → onUpdate widget limit guard
+    - showUpgradePrompt() mới
+    - getConfiguredWidgetIds() / saveConfiguredWidgetId()
+    - getPrefs() → FlutterSharedPreferences
+    - getString()/getInt()/getBoolean() helpers
+    - handleTap() dùng helper methods
+    - updateAppWidget() dùng helper methods
+
+Dart:
+  lib/services/widget_data_bridge.dart (MỚI)
+  lib/services/widget_service.dart
+  lib/services/iap_service.dart
+  lib/services/storage_service.dart
+  lib/main.dart
+  lib/screens/home_screen.dart
+  lib/screens/onboarding_screen.dart
+  lib/screens/settings_screen.dart
+  lib/screens/add_widget_guide_screen.dart
+  lib/screens/widget_config_screen.dart
+  lib/screens/collection_detail_screen.dart
+  lib/screens/onboarding_create_collection_screen.dart (MỚI)
+  lib/screens/onboarding_add_item_screen.dart (MỚI)
+  lib/widgets/onboarding_progress.dart (MỚI)
+  lib/models/collection_model.dart
+  lib/models/item_model.dart
+  lib/models/widget_config_model.dart
+
+Test:
+  test/widget_limit_test.dart (MỚI — 11 tests)
+  test/rotation_service_test.dart (MỚI — 11 tests)
+  test/storage_service_test.dart (MỚI — 21 tests)
+  test/widget_test.dart (có sẵn — 1 test)
+
+Config:
+  pubspec.yaml
+  android/app/src/main/AndroidManifest.xml
+  privacy.html (MỚI)
+  android/app/src/main/res/layout/widget_small.xml
+  android/app/src/main/res/layout/widget_medium.xml
+
+Tổng: 6 file mới, 14 file sửa, 44 tests, 0 errors, 0 warnings
+
+================================================================================

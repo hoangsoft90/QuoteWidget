@@ -1,0 +1,728 @@
+========================================================================
+QUOTE WIDGET — FULL CODE AUDIT REPORT
+========================================================================
+Date: 2026-09-02
+Plan file: plan1_final_v2.md
+Codebase: Flutter + Android (Kotlin) — Hive local storage, RemoteViews widget
+
+========================================================================
+PART 1: DATA MODEL (Mục 2) — Field-by-field verification
+========================================================================
+
+Q1: Collection có field itemIds[] không?
+---------------------------------------
+Answer: ✅ KHÔNG CÓ — đúng spec.
+Evidence — lib/models/collection_model.dart:
+  Fields: id, name, createdAt (3 fields total)
+  No itemIds, no list of item references.
+  Relationship flows FROM Item.collectionId → Collection (correct).
+
+Q2: Item có field pinned không?
+-------------------------------
+Answer: ✅ KHÔNG CÓ — đúng spec.
+Evidence — lib/models/item_model.dart:
+  Fields: id, collectionId, text, order, createdAt (5 fields total)
+  No "pinned" field anywhere.
+
+Q3: WidgetConfig.currentIndex — per-instance hay global?
+---------------------------------------------------------
+Answer: ✅ PER-INSTANCE — mỗi WidgetConfig có currentIndex riêng.
+Evidence — lib/models/widget_config_model.dart lines 7-8:
+  class WidgetConfig extends HiveObject {
+    final String id;
+    String collectionId;
+    int currentIndex;   // ← field on each WidgetConfig instance
+  ...
+  }
+Evidence — lib/services/widget_service.dart line 52:
+  final prefix = '$_prefix${config.id}';   // keyed by config.id, unique per widget
+  await HomeWidget.saveWidgetData<String>('${prefix}_$_currentIndexKey', ...);
+Evidence — QuoteWidgetProvider.kt line 49:
+  val prefix = "widget_$appWidgetId"   // keyed by appWidgetId, unique per widget instance
+  val currentIndex = prefs.getInt("${prefix}_currentIndex", 0)
+Verdict: currentIndex is stored per-WidgetConfig, per-appWidgetId. Tap widget A cannot affect widget B.
+
+Q4: rotationMode có giá trị "daily" không?
+-------------------------------------------
+Answer: ✅ KHÔNG CÓ — đúng MVP spec.
+Evidence — lib/models/widget_config_model.dart line 91:
+  enum RotationMode {
+    sequential,
+    random,
+  }
+Only 2 values. No "daily" in MVP. Plan says "Daily Reset" is P1 via WorkManager.
+
+Q5: Cascade-delete — xoá Collection xử lý Item con thế nào?
+-------------------------------------------------------------
+Answer: ✅ XÓA HẾT Item con + WidgetConfig con.
+Evidence — lib/services/storage_service.dart lines 75-91:
+  Future<void> deleteCollection(String id) async {
+    // Cascade delete: delete all items in this collection
+    final items = _itemsBox.values
+        .where((item) => item.collectionId == id)
+        .toList();
+    for (final item in items) {
+      await item.delete();
+    }
+    // Cascade delete: delete all widget configs for this collection
+    final widgetConfigs = _widgetConfigsBox.values
+        .where((config) => config.collectionId == id)
+        .toList();
+    for (final config in widgetConfigs) {
+      await config.delete();
+    }
+    // Delete the collection itself
+    await _collectionsBox.delete(id);
+  }
+
+⚠️ SAFETY SNAPSHOT: KHÔNG tạo trước khi cascade-delete.
+Plan §2 requires: "tự động tạo safety snapshot cục bộ trước khi xoá"
+Code only creates snapshots in backup_service.dart importBackup (overwrite mode).
+Collection deletion goes straight to deleteCollection() with NO snapshot.
+This is a spec deviation (see Part B #C below).
+
+Q6: WidgetConfig trỏ tới collectionId đã bị xoá — "Collection removed" state?
+-------------------------------------------------------------------------------
+Answer: ✅ CÓ XỬ LÝ RIÊNG — tách biệt với "collection rỗng".
+Evidence — QuoteWidgetProvider.kt lines 93-98:
+  val displayText = when {
+      collectionId == null -> "Tap to set up this widget"
+      text.isEmpty() -> "Add some content to this collection."        // ← collection rỗng
+      text == "__COLLECTION_REMOVED__" -> "Collection removed. Tap to choose another."  // ← collection bị xoá
+      else -> text
+  }
+Evidence — lib/services/widget_service.dart lines 78-89 (markCollectionRemoved):
+  Future<void> markCollectionRemoved(String collectionId) async {
+    final configs = _storageService.getAllWidgetConfigs()
+        .where((c) => c.collectionId == collectionId)
+        .toList();
+    for (final config in configs) {
+      final prefix = 'widget_${config.id}';
+      await HomeWidget.saveWidgetData<String>('${prefix}_text', '__COLLECTION_REMOVED__');
+      await HomeWidget.updateWidget(...);
+    }
+  }
+Evidence — lib/screens/home_screen.dart line 97:
+  Future<void> _deleteCollection(String id) async {
+    await widget.widgetService.markCollectionRemoved(id);  // sets sentinel BEFORE delete
+    await widget.storageService.deleteCollection(id);
+  }
+Verdict: Two distinct empty states exist. "Collection removed" and "empty collection" are NOT merged.
+
+
+========================================================================
+PART 2: ROTATION SERVICE — Test case analysis
+========================================================================
+
+Source: lib/services/rotation_service.dart (full file, 70 lines)
+
+Test 1: Sequential [A,B,C], currentIndex=0 → tap 3 times → 1, 2, 0
+----------------------------------------------------------------------
+Answer: ✅ PASS
+Evidence — rotation_service.dart line 34-35:
+  int _getSequentialNext(int currentIndex, int totalItems) {
+    return (currentIndex + 1) % totalItems;
+  }
+Trace:
+  Call 1: (0+1) % 3 = 1 ✅
+  Call 2: (1+1) % 3 = 2 ✅
+  Call 3: (2+1) % 3 = 0 ✅ (wrap-around via modulo)
+
+Test 2: Sequential — kill app / reload, currentIndex persistence
+-----------------------------------------------------------------
+Answer: ⚠️ PARTIAL PASS
+- Flutter side (Hive): currentIndex is a field on WidgetConfig persisted in Hive box. ✅ Survives app restart.
+- Native Kotlin side (SharedPreferences): QuoteWidgetProvider.kt line 50:
+    val currentIndex = prefs.getInt("${prefix}_currentIndex", 0)
+  SharedPreferences persists across app restarts. ✅
+- HOWEVER: After restart, onUpdate() is called by system, which reads currentIndex from prefs. ✅
+- BUT: Flutter's syncWidgetData() overwrites currentIndex every time it's called (widget_service.dart line 52).
+  If syncWidgetData is called on app launch with currentIndex=0 (from Hive default),
+  it would OVERWRITE the persisted native currentIndex back to 0.
+  ⚠️ Potential regression on restart — depends on timing of syncWidgetData vs native read.
+  VERDICT: PARTIAL — Hive persistence is correct, but Flutter→Native sync may overwrite on restart.
+
+Test 3: Random — currentIndex=0, tap 5 times, never returns 0 immediately?
+---------------------------------------------------------------------------
+Answer: ✅ PASS (guaranteed by code)
+Evidence — rotation_service.dart lines 38-46:
+  int _getRandomNext(int currentIndex, int totalItems) {
+    if (totalItems <= 1) {
+      return 0;
+    }
+    int nextIndex;
+    do {
+      nextIndex = _random.nextInt(totalItems);
+    } while (nextIndex == currentIndex);
+    return nextIndex;
+  }
+The do-while loop GUARANTEES nextIndex != currentIndex (when totalItems > 1).
+Cannot return same index. ✅ Matches spec: "random nhưng loại trừ index hiện tại"
+
+Test 4: "daily" rotation in MVP?
+---------------------------------
+Answer: ✅ CORRECTLY ABSENT
+Evidence — rotation_service.dart: only handles RotationMode.sequential and RotationMode.random.
+No daily/WorkManager/AlarmManager code exists.
+Plan says "Daily Reset" is P1 — correctly excluded from MVP.
+
+Test 5: Multiple instances — tap widget A affects widget B's currentIndex?
+--------------------------------------------------------------------------
+Answer: ✅ PASS — independent per instance
+Evidence — QuoteWidgetProvider.kt lines 49-50:
+  val prefix = "widget_$appWidgetId"   // each widget has unique appWidgetId
+  val currentIndex = prefs.getInt("${prefix}_currentIndex", 0)
+Evidence — QuoteWidgetProvider.kt line 71:
+  prefs.edit().putInt("${prefix}_currentIndex", nextIndex).apply()
+  // writes back to same appWidgetId-specific key
+Each widget reads/writes its own "${appWidgetId}_currentIndex" key.
+Tap widget A (appWidgetId=1001) writes to "widget_1001_currentIndex".
+Widget B (appWidgetId=1002) reads from "widget_1002_currentIndex".
+No shared state. ✅ Independent.
+
+
+========================================================================
+PART 3: BACKUP SERVICE — Deep audit
+========================================================================
+
+Source: lib/services/backup_service.dart (157 lines)
+
+Q1: Only 2 modes (Append + Overwrite)? No "Merge by Collection"?
+-----------------------------------------------------------------
+Answer: ✅ CORRECT — exactly 2 modes.
+Evidence — backup_service.dart line 95:
+  Future<ImportResult> importBackup({
+    required String filePath,
+    required bool overwrite,    // ← single boolean, not an enum
+  }) ...
+When overwrite==true → Overwrite mode (line 131).
+When overwrite==false → Append mode (line 145).
+No third mode exists. No "Merge by Collection." ✅
+
+Q2: Append mode — skip by UUID id?
+------------------------------------
+Answer: ✅ CORRECT — skips duplicates.
+Evidence — storage_service.dart lines 155-170 (appendFromBackup):
+  // Append collections (skip if ID exists)
+  for (final collection in collections) {
+    if (_collectionsBox.get(collection.id) == null) {
+      await _collectionsBox.put(collection.id, collection);
+    }
+  }
+  // Append items (skip if ID exists)
+  for (final item in items) {
+    if (_itemsBox.get(item.id) == null) {
+      await _itemsBox.put(item.id, item);
+    }
+  }
+  // Append widget configs (skip if ID exists)
+  for (final config in widgetConfigs) {
+    if (_widgetConfigsBox.get(config.id) == null) {
+      await _widgetConfigsBox.put(config.id, config);
+    }
+  }
+Logic: check existence by key → if null, insert; if exists, skip.
+Also deduplicated within backup file before import (backup_service.dart lines 120-125):
+  final seenCollectionIds = <String>{};
+  collections = collections.where((c) => seenCollectionIds.add(c.id)).toList();
+  // same for items and widgetConfigs
+
+Q3: Overwrite — snapshot BEFORE delete? Rollback on error?
+-----------------------------------------------------------
+Answer: ✅ YES — snapshot created before clearAll. Rollback exists.
+Evidence — backup_service.dart lines 131-143:
+  if (overwrite) {
+    await _snapshotManager.createSnapshot(          // ← STEP 1: snapshot FIRST
+      collections: _storageService.getAllCollections(),
+      items: _storageService.getAllItems(),
+      widgetConfigs: _storageService.getAllWidgetConfigs(),
+    );
+    try {
+      await _storageService.restoreFromBackup(      // ← STEP 2: clearAll + write new data
+        collections: collections,
+        items: items,
+        widgetConfigs: widgetConfigs,
+      );
+    } catch (e) {
+      await _snapshotManager.restoreLatestSnapshot(_storageService);  // ← STEP 3: rollback
+      return ImportResult(success: false, message: 'Import failed. Previous data restored from safety snapshot.');
+    }
+  }
+
+Test case — mid-process failure:
+  Scenario: clearAll() succeeds, but writing 2nd collection fails.
+  - Snapshot was created BEFORE clearAll ✅
+  - clearAll() removes all data
+  - restoreFromBackup() starts writing collections
+  - Exception thrown at 2nd collection.put()
+  - catch block calls restoreLatestSnapshot() ✅
+  - Data restored to pre-overwrite state ✅
+  VERDICT: Correct for exception-based failures.
+
+⚠️ LIMITATION: If app process is killed (SIGKILL) mid-restore,
+the snapshot file exists but no code auto-restores it.
+User must manually restore from Backup Screen → Safety Snapshots.
+This is acceptable for MVP — true crash recovery would require
+a separate watchdog service.
+
+Q4: Error cases — PASS/FAIL per plan §4
+-----------------------------------------
+
+1. JSON không hợp lệ
+   ✅ PASS
+   Evidence — backup_service.dart lines 108-113:
+     try {
+       data = jsonDecode(json) as Map<String, dynamic>;
+     } catch (e) {
+       return ImportResult(success: false, message: 'Invalid JSON file');
+     }
+
+2. Sai schema / thiếu field bắt buộc
+   ⚠️ PARTIAL PASS
+   Evidence — backup_service.dart lines 115-128:
+     if (data['backupFormat'] != 'quote-widget-backup') → error
+     if (data['schemaVersion'] == null) → error
+     if (data['collections'] == null || data['items'] == null || ...) → error
+   BUT: does NOT check:
+     - appVersion missing
+     - platform missing
+     - collection missing 'name' (Collection.fromJson will crash)
+     - collection missing 'createdAt' (DateTime.parse(null) will crash)
+   Gap: A backup with valid structure but missing 'createdAt' on a collection
+   will crash at Collection.fromJson() line 44: DateTime.parse(json['createdAt'])
+   despite passing the top-level schema check.
+
+3. File rỗng
+   ✅ PASS
+   Evidence: file.readAsString() returns "". jsonDecode("") throws FormatException → caught.
+   Also: fileSize check (line 103) would catch 0-byte files as valid size.
+
+4. File quá lớn (>20MB)
+   ✅ PASS
+   Evidence — backup_service.dart lines 102-106:
+     final fileSize = await file.length();
+     if (fileSize > 20 * 1024 * 1024) {
+       return ImportResult(success: false, message: 'File too large (max 20MB)');
+     }
+
+5. id trùng lặp trong chính file backup
+   ✅ PASS
+   Evidence — backup_service.dart lines 120-125:
+     final seenCollectionIds = <String>{};
+     collections = collections.where((c) => seenCollectionIds.add(c.id)).toList();
+     final seenItemIds = <String>{};
+     items = items.where((i) => seenItemIds.add(i.id)).toList();
+     final seenConfigIds = <String>{};
+     widgetConfigs = widgetConfigs.where((w) => seenConfigIds.add(w.id)).toList();
+
+6. collectionId reference không tồn tại trong backup file
+   ✅ PASS
+   Evidence — backup_service.dart lines 127-128:
+     final validCollectionIds = collections.map((c) => c.id).toSet();
+     items = items.where((i) => validCollectionIds.contains(i.collectionId)).toList();
+   Items with invalid collectionId are silently dropped, not imported.
+
+Q5: Backup JSON schema — correct fields?
+-----------------------------------------
+Answer: ✅ MATCHES PLAN EXACTLY
+Evidence — backup_data.dart toJson():
+  Map<String, dynamic> toJson() {
+    return {
+      'backupFormat': backupFormat,      // "quote-widget-backup"
+      'schemaVersion': schemaVersion,    // 1
+      'appVersion': appVersion,          // "1.0.0"
+      'createdAt': createdAt.toIso8601String(),
+      'platform': platform,              // "android"
+      'collections': [...],
+      'items': [...],
+      'widgetConfigs': [...],
+    };
+  }
+
+Example exported JSON:
+{
+  "backupFormat": "quote-widget-backup",
+  "schemaVersion": 1,
+  "appVersion": "1.0.0",
+  "createdAt": "2026-09-02T12:00:00.000",
+  "platform": "android",
+  "collections": [
+    {"id": "abc123", "name": "Daily Affirmations", "createdAt": "2026-09-02T10:00:00.000"}
+  ],
+  "items": [
+    {"id": "def456", "collectionId": "abc123", "text": "I am capable...", "order": 0, "createdAt": "2026-09-02T10:00:00.000"}
+  ],
+  "widgetConfigs": [
+    {"id": "ghi789", "collectionId": "abc123", "currentIndex": 0, "rotationMode": "sequential", "appearance": {"theme": "light", "fontSize": 18.0, "textColor": 4278190080, "background": 4294967295, "alignment": "center"}, "sizeCategory": "small"}
+  ]
+}
+
+
+========================================================================
+PART 4: ANDROID WIDGET (Mục 5) — Full audit
+========================================================================
+
+Q1: RemoteViews XML hay Jetpack Glance?
+----------------------------------------
+Answer: ✅ RemoteViews XML — correct per spec.
+Evidence:
+  - android/app/src/main/res/layout/widget_small.xml: <FrameLayout> + <TextView>
+  - android/app/src/main/res/layout/widget_medium.xml: <LinearLayout> + <TextView>
+  - QuoteWidgetProvider.kt line 109: val views = RemoteViews(context.packageName, layoutResId)
+  No Glance dependency anywhere.
+
+Q2: isRequestPinAppWidgetSupported() → fallback flow
+------------------------------------------------------
+Answer: ✅ PASS (indirect)
+Flutter side — widget_service.dart lines 112-122:
+  Future<bool> requestPinWidget() async {
+    try {
+      await HomeWidget.requestPinWidget(androidName: 'QuoteWidgetProvider');
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+The home_widget plugin internally calls AppWidgetManager.isRequestPinAppWidgetSupported().
+If false/unsupported → returns false.
+
+Fallback — add_widget_guide_screen.dart lines 35-42:
+  Future<void> _tryPinWidget() async {
+    final supported = await widget.widgetService.requestPinWidget();
+    setState(() {
+      _pinRequested = true;
+      _pinSupported = supported;
+    });
+  }
+If _pinSupported==false → auto-add button hidden, manual OEM guide shown.
+
+OEM guide variants — widget_service.dart lines 130-175:
+  Samsung One UI: "Long press → Widgets → Find Your Words → Tap Add"
+  Xiaomi MIUI: "Long press → Add widgets → Find Your Words → Tap to add"
+  Stock Android (default): "Long press → Widgets → Find Your Words → Drag to home screen"
+
+Q3: minSdk / targetSdk
+-----------------------
+Answer: ✅ CORRECT
+Evidence — android/app/build.gradle.kts lines 21-22:
+  minSdk = 24          // ✅ matches spec exactly
+  targetSdk = flutter.targetSdkVersion  // ✅ follows Flutter default (currently 35)
+
+Q4: INTERNET permission
+-----------------------
+Answer: ✅ NOT PRESENT — correct per spec
+Evidence — android/app/src/main/AndroidManifest.xml:
+  <!-- No INTERNET permission - app is offline-only -->
+  No <uses-permission android:name="android.permission.INTERNET" /> anywhere in file.
+
+Q5: Widget resize config
+-------------------------
+Answer: ✅ 2 fixed sizes, no free resize
+Evidence — android/app/src/main/res/xml/widget_provider_info.xml:
+  android:minWidth="110dp"
+  android:minHeight="110dp"
+  android:minResizeWidth="110dp"
+  android:minResizeHeight="110dp"
+  android:resizeMode="none"        // ← user cannot freely resize
+  android:targetCellWidth="2"
+  android:targetCellHeight="1"
+Two layouts: widget_small.xml and widget_medium.xml.
+onAppWidgetOptionsChanged() handles edge cases (QuoteWidgetProvider.kt lines 23-27).
+
+Q6: Acceptance Criteria 8 items (mục 5.5)
+-------------------------------------------
+ALL 8 ARE UNTESTED — no Android emulator/device in this environment.
+No Firebase Test Lab configured.
+
+| # | Criterion                      | Code Analysis                                              | Verdict    |
+|---|--------------------------------|-----------------------------------------------------------|------------|
+| 1 | Render đúng text               | QuoteWidgetProvider.kt:91 setTextViewText reads from SP    | UNTESTED   |
+| 2 | Tap đổi text, không mở app    | PendingIntent with WIDGET_TAP → handleTap → updateWidget   | UNTESTED   |
+| 3 | Sống sót sau force-stop        | SharedPreferences persistent + onUpdate called by system   | UNTESTED   |
+| 4 | Sống sót sau reboot            | Same as #3 — SP survives reboot                            | UNTESTED   |
+| 5 | Nhiều instance độc lập         | Keyed by appWidgetId — separate SP keys per instance       | UNTESTED   |
+| 6 | Collection rỗng → empty state  | text.isEmpty() → "Add some content to this collection."    | UNTESTED   |
+| 7 | Item bị xoá → tự chuyển       | ⚠️ totalItems never written by Flutter — may be BROKEN     | UNTESTED   |
+| 8 | Update data → widget cập nhật | syncWidgetData → HomeWidget.updateWidget chain exists      | UNTESTED   |
+
+🔴 CRITICAL BUG for AC#7: totalItems is READ in Kotlin (QuoteWidgetProvider.kt:52)
+but NEVER WRITTEN by Flutter's WidgetService.syncWidgetData().
+The Kotlin handleTap() uses totalItems to calculate nextIndex and to check for empty collections.
+Without this field, tap cycling defaults to totalItems=0 → handleTap returns immediately.
+
+
+========================================================================
+PART 5: SAMPLE CONTENT
+========================================================================
+
+Source: lib/services/sample_data_service.dart
+
+ALL content is self-written/generic. No celebrity names in text.
+
+Collection 1 — "Daily Affirmations" (8 items):
+  1. I am capable of achieving great things.
+  2. Today is full of possibilities.
+  3. I choose to focus on what I can control.
+  4. Every challenge is an opportunity to grow.
+  5. I am worthy of success and happiness.
+  6. My potential is limitless.
+  7. I attract positive energy into my life.
+  8. I am grateful for this moment.
+
+Collection 2 — "Productivity Quotes" (6 items):
+  1. The secret of getting ahead is getting started.
+  2. Focus on being productive instead of busy.
+  3. It's not that I'm so smart, it's just that I stay with problems longer.
+  4. The way to get started is to quit talking and begin doing.
+  5. Don't watch the clock; do what it does. Keep going.
+  6. Amateurs sit and wait for inspiration, the rest of us just get up and go to work.
+
+⚠️ NOTE: Collection 2 contains famous sayings (Mark Twain, Steve Jobs, etc.)
+but WITHOUT attribution. Plan says "không dùng quote gắn celebrity."
+These are common/public-domain phrases, but to be completely safe,
+consider replacing with fully original content.
+
+Collection 3 — "Mindfulness Reminders" (8 items):
+  1. Be here now.
+  2. Breathe in calm, breathe out tension.
+  3. This moment is enough.
+  4. Let go of what you can't control.
+  5. Peace begins with a single breath.
+  6. You are not your thoughts.
+  7. Observe without judgment.
+  8. Return to your breath.
+
+
+========================================================================
+PART 6: ONBOARDING
+========================================================================
+
+Source: lib/screens/onboarding_screen.dart
+
+Steps:
+  1. Welcome screen with 3 buttons:
+     - "Start with Sample" → creates 3 collections → navigates to AddWidgetGuideScreen
+     - "Add Your Own" → navigates straight to HomeScreen (NO guidance)
+     - "Skip" → navigates to HomeScreen
+
+⚠️ SPEC DEVIATION: Plan says "Add Your Own" should guide user through
+creating first collection → adding first item → Add Widget Guide.
+Current code just jumps to HomeScreen with no guidance.
+
+Time-to-widget measurement: UNTESTED — no device available.
+Fastest theoretical path: 2 taps (Start with Sample → Auto-pin).
+
+
+========================================================================
+PART 7: SHARE SHEET
+========================================================================
+
+Q1: Package used
+-----------------
+Answer: ⚠️ NOT share_handler — uses SharedPreferences bridge instead.
+Evidence — AndroidManifest.xml lines 38-47:
+  <activity android:name="com.example.quotewidget.ShareReceiverActivity"
+            android:exported="true">
+    <intent-filter>
+      <action android:name="android.intent.action.SEND" />
+      <data android:mimeType="text/plain" />
+    </intent-filter>
+  </activity>
+
+Evidence — ShareReceiverActivity.kt lines 22-27:
+  val prefs = getSharedPreferences("share_prefs", MODE_PRIVATE)
+  prefs.edit()
+      .putString("pending_share_text", sharedText)
+      .putLong("share_timestamp", System.currentTimeMillis())
+      .apply()
+
+Evidence — main.dart lines 41-45:
+  final pendingShareText = prefs.getString('pending_share_text');
+  if (pendingShareText != null && pendingShareText.isNotEmpty) {
+    await prefs.remove('pending_share_text');
+    ...
+  }
+
+🔴 BUG: AndroidManifest.xml:28 references "com.example.quotewidget.ShareReceiverActivity"
+but actual package is "com.quotewidget.quotewidget". ClassNotFoundException at runtime.
+Share sheet is COMPLETELY BROKEN.
+
+Q2: URL-only handling
+----------------------
+Answer: ✅ CORRECT — no scraping, prompts user to add note
+Evidence — share_service.dart lines 57-62:
+  bool _isUrlOnly(String text) {
+    final trimmed = text.trim();
+    final urlPattern = RegExp(
+      r'^(https?:\/\/)?[\w-]+(\.[\w-]+)+([\/\w\-.\~:?#@!$&\(\)*+,;=%]*)?$',
+      caseSensitive: false,
+    );
+    return urlPattern.hasMatch(trimmed);
+  }
+When URL-only → ShareResult(isUrlOnly: true, message: 'URL received. Add a note about this link?')
+Opens app for user to confirm — no automatic scraping. ✅
+
+Q3: Progress indicator (n/total)
+---------------------------------
+Answer: ⚠️ PARTIAL
+In-app: Shows item COUNT (not position) — collection_detail_screen.dart:
+  Text('${_items.length} item${_items.length == 1 ? '' : 's'}')
+In widget: NOT displayed — no index/total TextView in widget layouts.
+quote_card.dart supports it but is only used for in-app preview, not the actual home screen widget.
+
+Q4: Restore Purchases button
+------------------------------
+Answer: ❌ NOT IMPLEMENTED
+No in_app_purchase package, no IAP code, no Restore Purchases button anywhere.
+This is a BLOCKER for App Store Review Guideline 3.1.1.
+
+
+========================================================================
+PART 8: MONETIZATION / STORE CHECKLIST
+========================================================================
+
+Q1: Free tier limits on items/collections
+-------------------------------------------
+Answer: ✅ NO LIMITS coded — unlimited items and collections.
+Plan says "Free: unlimited items + 1 widget."
+Widget limit (1) is NOT enforced — no code prevents creating multiple WidgetConfigs.
+
+Q2: Tip Jar / Ads code
+------------------------
+Answer: ✅ CLEAN — zero matches for tip, jar, ads, banner, interstitial,
+admob, google_ads, reward, purchase, IAP, in_app in entire codebase.
+
+Q3: Pro price / IAP config / Introductory Sale
+------------------------------------------------
+Answer: ❌ NOT IMPLEMENTED
+No in_app_purchase package in pubspec.yaml.
+No product IDs, no price configuration, no Introductory Sale setup.
+Plan specifies "$3.99–$4.99" with "Introductory Sale tuần đầu ~$2.49."
+
+Q4: Privacy policy
+-------------------
+Answer: ❌ NOT IN APP
+No privacy policy URL, no in-app privacy screen, no HTML file.
+Plan §13: "Privacy policy: nêu rõ app offline-first, không thu thập dữ liệu, không cloud"
+The app IS genuinely offline-first (no INTERNET permission), but no policy document exists.
+
+
+========================================================================
+PART 9: TOP 5 CRASH / REJECTION RISKS (Ranked by severity)
+========================================================================
+
+#1 🔴 CRITICAL: totalItems never written to SharedPreferences
+   File: widget_service.dart (MISSING write)
+   File: QuoteWidgetProvider.kt:52 (reads it)
+   Impact: Widget tap cycling is FROZEN — handleTap() sees totalItems=0,
+           returns immediately. Widget displays text but cannot advance.
+   Fix: Add to syncWidgetData(): saveWidgetData('${prefix}_totalItems', items.length.toString())
+
+#2 🔴 CRITICAL: DropdownButtonFormField uses invalid parameter
+   File: widget_config_screen.dart:182
+   Code: initialValue: _selectedCollection
+   Impact: Compile-time error. App crashes when opening Widget Config screen.
+   Fix: Change to: value: _selectedCollection
+
+#3 🔴 HIGH: ShareReceiverActivity package name mismatch
+   File: AndroidManifest.xml:28
+   Code: android:name="com.example.quotewidget.ShareReceiverActivity"
+   Actual package: com.quotewidget.quotewidget
+   Impact: ClassNotFoundException when share intent arrives. Share sheet completely broken.
+   Fix: Change to: android:name="com.quotewidget.quotewidget.ShareReceiverActivity"
+
+#4 🟡 MEDIUM: collection.name[0] crashes on empty string
+   File: home_screen.dart:122
+   Code: collection.name[0].toUpperCase()
+   Impact: RangeError if name is empty (low probability due to dialog validation, but
+           defensive coding is missing).
+   Fix: Add: collection.name.isNotEmpty ? collection.name[0].toUpperCase() : '?'
+
+#5 🔴 REJECTION: No Privacy Policy + No Restore Purchases
+   Impact: Google Play requires privacy policy for ALL apps.
+           App Store requires Restore Purchases for any app with IAP.
+           Neither exists. Guaranteed store rejection.
+
+
+========================================================================
+PART 10: SPEC DEVIATIONS — Where I Interpreted Instead of Following Literally
+========================================================================
+
+A | Spec: "gọi AppWidgetManager.isRequestPinAppWidgetSupported()"
+  | Did: Delegated to home_widget plugin which does this internally
+  | Risk: Low — functionally equivalent
+
+B | Spec: "share_handler package"
+  | Did: Manual SharedPreferences bridge via ShareReceiverActivity
+  | Risk: Medium — misses share_handler's state management for killed apps
+
+C | Spec: "cascade-delete...tự động tạo safety snapshot TRƯỚC khi xoá"
+  | Did: storage_service.dart deleteCollection() has NO snapshot before delete
+  | Risk: HIGH — accidental delete = permanent data loss, no rollback possible
+
+D | Spec: "Progress indicator (n/total trong collection)"
+  | Did: Item count badge "${_items.length} items" in AppBar
+  | Risk: Medium — shows count, not position (n/total)
+
+E | Spec: "WidgetConfig trỏ tới Collection đã bị xoá → state riêng: Collection removed"
+  | Did: Sentinel string "__COLLECTION_REMOVED__" in SharedPreferences
+  | Risk: Low — fragile but unlikely collision
+
+F | Spec: "Onboarding: Add your own → hướng dẫn tạo collection đầu tiên → thêm item → Add Widget"
+  | Did: _addYourOwn() navigates straight to HomeScreen with no guidance
+  | Risk: Medium — poor onboarding UX, may miss <60s first-widget KPI
+
+
+========================================================================
+PART 11: LEAST TESTED AREA
+========================================================================
+
+THE ENTIRE NATIVE ANDROID WIDGET LAYER:
+  - QuoteWidgetProvider.kt (134 lines)
+  - WidgetReceiver.kt (25 lines)
+  - ShareReceiverActivity.kt (31 lines)
+  - widget_small.xml, widget_medium.xml, widget_loading.xml
+  - widget_provider_info.xml
+  - Flutter↔Native SharedPreferences bridge
+
+Why this is highest risk:
+  1. Zero runtime testing possible — no emulator, no device, no Firebase Test Lab
+  2. Flutter↔Native bridge is #1 crash source in cross-platform apps
+  3. The totalItems bug (Risk #1) proves the bridge is already misaligned
+  4. RemoteViews is notoriously fragile on OEM launchers (MIUI, Samsung One UI)
+  5. PendingIntent.FLAG_IMMUTABLE correctness can only be verified on Android 12+
+  6. SharedPreferences key naming mismatch between Dart and Kotlin is silent — no compile error
+
+
+========================================================================
+PART 12: SUMMARY OF ALL GAPS
+========================================================================
+
+CRITICAL (must fix before any testing):
+  [1] totalItems not written to SharedPreferences → widget tap frozen
+  [2] DropdownButtonFormField: initialValue → value (compile error)
+  [3] ShareReceiverActivity wrong package name (ClassNotFoundException)
+  [4] No Restore Purchases button (App Store rejection)
+  [5] No Privacy Policy (Google Play rejection)
+
+HIGH (fix before Store submit):
+  [6] No safety snapshot before collection cascade-delete
+  [7] No item/collection limit enforcement (widget limit also unenforced)
+  [8] Share sheet uses SharedPreferences, not share_handler package
+  [9] No IAP infrastructure at all (no in_app_purchase package)
+
+MEDIUM (fix before public launch):
+  [10] Progress indicator shows count, not position
+  [11] "Add Your Own" onboarding skips guidance flow
+  [12] collection.name[0] defensive check missing
+  [13] Sample "Productivity Quotes" may contain attributed sayings
+
+LOW (polish):
+  [14] __COLLECTION_REMOVED__ sentinel is fragile
+  [15] onboarding_screen.dart _buildProgressIndicator is static (always step 1 active)
+  [16] No unit tests for RotationService or StorageService
+  [17] widget_loading.xml exists but is never shown (initialLayout in provider info)
+
+========================================================================
+END OF REPORT
+========================================================================

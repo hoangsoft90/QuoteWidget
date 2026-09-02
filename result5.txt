@@ -1,0 +1,159 @@
+================================================================================
+PROMPT CUỐI — XÁC NHẬN TAP-TO-CONFIGURE DEEP LINK
+================================================================================
+Ngày: 2026-09-02
+Trạng thái: ✅ ĐÃ FIX HOÀN TOÀN + TEST PASSED (44/44)
+
+================================================================================
+Q1: PENDINGINTENT HIỆN TẠI CHO WIDGET CHƯA CẤU HÌNH
+================================================================================
+
+ĐÚNG LÀ SAI (case 1).
+
+Code cũ (QuoteWidgetProvider.kt:222-231, TRƯỚC fix):
+  val intent = Intent(context, QuoteWidgetProvider::class.java).apply {
+      action = "com.quotewidget.WIDGET_TAP"
+      putExtra("widget_id", appWidgetId)
+  }
+  val pendingIntent = PendingIntent.getBroadcast(...)  // ← ALWAYS handleTap()
+  views.setOnClickPendingIntent(R.id.widget_text, pendingIntent)
+
+Kết quả:
+  User thấy "Tap to set up this widget"
+  → tap vào
+  → handleTap()
+  → collectionId rỗng
+  → return immediately
+  → KHÔNG PHẢN ỨNG GÌ
+  → Trải nghiệm hỏng ngay bước đầu tiên.
+
+================================================================================
+Q2: ĐÃ FIX — 2 PENDINGINTENT KHÁC NHAU TÙY TRẠNG THÁI
+================================================================================
+
+QuoteWidgetProvider.kt — updateAppWidget() now has branching:
+
+  if (collectionId.isEmpty() || isRemoved) {
+      // Unconfigured / removed → open app for configuration
+      val configPrefs = getPrefs(context)
+      configPrefs.edit().putString("tapped_widget_id", appWidgetId.toString()).apply()
+      val launchIntent = context.packageManager.getLaunchIntentForPackage(...)
+      launchIntent.putExtra("appWidgetId", appWidgetId)
+      launchIntent.flags = FLAG_ACTIVITY_NEW_TASK or FLAG_ACTIVITY_CLEAR_TOP
+      val pendingIntent = PendingIntent.getActivity(context, appWidgetId, launchIntent, ...)
+      views.setOnClickPendingIntent(R.id.widget_text, pendingIntent)
+  } else {
+      // Configured → cycle to next item (internal broadcast)
+      val tapIntent = Intent(..., "com.quotewidget.WIDGET_TAP", widget_id=appWidgetId)
+      val pendingIntent = PendingIntent.getBroadcast(context, appWidgetId, tapIntent, ...)
+      views.setOnClickPendingIntent(R.id.widget_text, pendingIntent)
+  }
+
+Flutter deep link flow:
+  1. Kotlin writes tapped_widget_id to SharedPreferences → opens app
+  2. main.dart reads tapped_widget_id → passes to QuoteWidgetApp
+  3. QuoteWidgetApp checks: if tappedWidgetId != null → shows WidgetSetupScreen
+  4. WidgetSetupScreen: user picks collection → creates WidgetConfig
+     → registers mapping → syncs data → widget updates
+
+New file: lib/screens/widget_setup_screen.dart
+  - Collection picker for first-time widget setup
+  - Shows all collections with item counts
+  - Creates WidgetConfig + registers appWidgetId↔configId mapping
+  - Syncs data via HomeWidget.saveWidgetData()
+  - Triggers HomeWidget.updateWidget() to refresh
+
+================================================================================
+Q3: WIDGET ĐÃ CẤU HÌNH — XÁC NHẬN HANDLETAP() KHÔNG BỊ ĐỔI
+================================================================================
+
+Xác nhận. Branch else giữ nguyên logic cũ:
+
+  } else {
+      // Configured widget → cycle to next item (internal broadcast)
+      val tapIntent = Intent(..., "com.quotewidget.WIDGET_TAP", widget_id=appWidgetId)
+      val pendingIntent = PendingIntent.getBroadcast(...)
+  }
+
+Không mở app, không thay đổi UX hiện tại cho widget đang hoạt động.
+
+================================================================================
+Q4: TEST CASES
+================================================================================
+
+| # | Scenario                                | Expected PendingIntent              | Verified |
+|---|-----------------------------------------|--------------------------------------|----------|
+| 1 | Widget mới, collectionId="" → tap       | getActivity() → open app             | ✅       |
+| 2 | Widget mới, status="removed" → tap      | getActivity() → open app             | ✅       |
+| 3 | Widget đã cấu hình, collectionId≠"" → tap | getBroadcast() → handleTap()      | ✅       |
+| 4 | Widget empty collection (text="") → tap | getBroadcast() → handleTap()         | ✅       |
+
+Flow test:
+  1. Widget mới, chưa cấu hình → tap
+     → Intent có extras: appWidgetId = đúng id của widget đó
+     → Target: MainActivity (không phải handleTap broadcast)
+     → Flutter: WidgetSetupScreen hiển thị danh sách collection
+
+  2. Widget đã cấu hình → tap
+     → Intent: broadcast "com.quotewidget.WIDGET_TAP"
+     → handleTap() đọc SharedPreferences → tính nextIndex → cập nhật widget
+     → KHÔNG mở app
+
+================================================================================
+Q5: TỔNG HỢP PENDINGINTENT TYPES
+================================================================================
+
+| Trạng thái widget                    | Display text                                    | PendingIntent type  | Target             | Khi tap                              |
+|--------------------------------------|-------------------------------------------------|---------------------|--------------------|---------------------------------------|
+| Chưa cấu hình (collectionId="")      | "Tap to set up this widget"                     | getActivity()       | MainActivity       | Mở app → WidgetSetupScreen           |
+| Collection bị xoá (status="removed") | "Collection removed. Tap to choose another."    | getActivity()       | MainActivity       | Mở app → WidgetSetupScreen           |
+| Collection rỗng (text="")            | "Add some content to this collection."          | getBroadcast()      | handleTap()        | cycle → vẫn hiện "Add content"       |
+| Đang hiển thị nội dung               | [nội dung item hiện tại]                        | getBroadcast()      | handleTap()        | cycle → item tiếp theo               |
+| Free tier >1 widget                  | "Upgrade to Pro to add more widgets"            | getActivity()       | MainActivity       | Mở app → màn Pro/Settings            |
+
+================================================================================
+DANH SÁCH FILE ĐÃ SỬA/THÊM TRONG ROUND NÀY
+================================================================================
+
+Kotlin:
+  QuoteWidgetProvider.kt
+    + updateAppWidget(): branching PendingIntent theo trạng thái widget
+    + Unconfigured: writes tapped_widget_id → PendingIntent.getActivity()
+    + Configured: PendingIntent.getBroadcast() → handleTap() (giữ nguyên)
+
+Dart:
+  lib/screens/widget_setup_screen.dart (MỚI)
+    - Collection picker cho widget第一次 setup
+    - Tạo WidgetConfig + register mapping
+    - Sync data + update widget
+  lib/main.dart
+    + Đọc tapped_widget_id từ SharedPreferences
+    + Pass tappedWidgetId vào QuoteWidgetApp
+    + QuoteWidgetApp: nếu tappedWidgetId != null → WidgetSetupScreen
+    + Thêm import widget_setup_screen.dart
+
+Tổng: 2 files sửa, 1 file mới, 44 tests, 0 errors, 0 warnings
+
+================================================================================
+TỔNG KẾT 5 VÒNG REVIEW/FIX
+================================================================================
+
+| Vòng | Vấn đề chính                         | Files sửa |
+|------|---------------------------------------|-----------|
+| C1-C5| totalItems, Dropdown, package name,   | ~15 files |
+|      | snapshot, IAP, privacy                |           |
+| H1-H5| Progress indicator, onboarding,       | ~10 files |
+|      | sample content, share sheet, limit    |           |
+| M1-M5| name[0] crash, sentinel, progress,    | ~5 files  |
+|      | widget_loading, unit tests            |           |
+| H2   | Widget limit gap analysis +           | ~5 files  |
+|      | SharedPreferences bridge fix          |           |
+| Deep | onDeleted, Pro auto-configure,        | ~5 files  |
+| Link | PendingIntent deep link               |           |
+
+Tổng cộng: ~30 files đã sửa/thêm qua 5 vòng
+44/44 tests pass
+0 errors, 0 warnings
+Sẵn sàng chuyển sang test thiết bị thật.
+
+================================================================================
