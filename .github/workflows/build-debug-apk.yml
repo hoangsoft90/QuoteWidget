@@ -39,26 +39,29 @@ jobs:
         run: flutter test --no-pub 2>&1 | tail -10
 
       - name: Build debug APK
-        run: flutter build apk --debug
+        run: flutter build apk --debug > build-output.txt 2>&1; echo "EXIT_CODE=$?" >> build-output.txt; cat build-output.txt | tail -100
 
       - name: Debug - list build directory
         if: always()
         run: |
-          echo "=== build/ tree ==="
-          find build -type f 2>/dev/null | head -50
-          echo "=== All .apk files ==="
-          find . -name "*.apk" -type f 2>/dev/null
-          echo "=== All outputs ==="
-          find . -path "*/outputs/*" -type f 2>/dev/null | head -20
-          echo "=== flutter build info ==="
-          flutter build apk --help 2>&1 | head -5
+          echo "=== All files ==="
+          find build -type f 2>/dev/null | head -50 || echo "No build/"
+          find . -name "*.apk" 2>/dev/null || echo "No APK"
+          echo "=== Last 200 lines of build output ==="
+          tail -200 build-output.txt 2>/dev/null || echo "No output"
 
       - name: Summary
         if: always()
         run: |
           APK=$(find . -name "*.apk" -type f 2>/dev/null | head -1)
           if [ -n "$APK" ]; then
-            echo "✅ APK: $APK ($(du -h "$APK" | cut -f1))" >> $GITHUB_STEP_SUMMARY
+            echo "## ✅ APK Built" >> $GITHUB_STEP_SUMMARY
+            echo "Path: \`$APK\`" >> $GITHUB_STEP_SUMMARY
           else
-            echo "❌ No APK found - check Debug step above" >> $GITHUB_STEP_SUMMARY
+            echo "## ❌ Build Failed" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Last 50 lines of build output:" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            tail -50 build-output.txt 2>/dev/null >> $GITHUB_STEP_SUMMARY || echo "No output" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
           fi
