@@ -81,7 +81,7 @@ for a in d.get('artifacts', []):
 
 ## Workflow Details
 
-- **Flutter version:** 3.29.3 stable
+- **Flutter version:** 3.32.4 stable
 - **Java:** Temurin JDK 17
 - **Build command:** `./gradlew assembleDebug --no-daemon` (Gradle 9.3.1, AGP 9.1.0)
 - **Output:** `app/build/outputs/flutter-apk/app-debug.apk`
