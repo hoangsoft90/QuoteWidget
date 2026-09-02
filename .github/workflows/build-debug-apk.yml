@@ -71,11 +71,13 @@ jobs:
       - name: Find and upload APK
         if: steps.build.outputs.exit_code == '0'
         run: |
-          APK=$(find app/build -name "*.apk" -type f 2>/dev/null | head -1)
+          APK=$(find android/app/build -name "*.apk" -type f 2>/dev/null | head -1)
           echo "APK=$APK" >> "$GITHUB_OUTPUT"
           if [ -n "$APK" ]; then
             echo "## ✅ APK Built" >> $GITHUB_STEP_SUMMARY
             echo "Path: \`$APK\` ($(du -h "$APK" | cut -f1))" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## ❌ No APK found" >> $GITHUB_STEP_SUMMARY
           fi
 
       - name: Upload APK artifact
@@ -83,5 +85,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: debug-apk
-          path: app/build/outputs/flutter/apk/*.apk
+          path: android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: warn
