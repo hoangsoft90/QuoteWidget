@@ -30,40 +30,29 @@ jobs:
           flutter --version
           dart --version
 
-      - name: Delete stale pubspec.lock and re-resolve
+      - name: Install dependencies
         run: |
           rm -f pubspec.lock
           flutter pub get
 
-      - name: Run flutter doctor
-        run: flutter doctor -v
-
       - name: Run tests
         run: flutter test --no-pub || true
 
-      - name: Build debug APK (verbose)
-        run: flutter build apk --debug --no-pub --verbose 2>&1 | tee build-log.txt
-        continue-on-error: true
+      - name: Build debug APK
+        run: flutter build apk --debug
 
-      - name: Upload build log
+      - name: List all build outputs
         if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-log
-          path: build-log.txt
-          retention-days: 7
-
-      - name: Find and upload APK
-        if: success()
         run: |
-          echo "=== Searching for APK files ==="
-          find . -name "*.apk" -type f 2>/dev/null
-          echo "=== Build outputs ==="
-          find . -path "*/build/outputs/*" -type f 2>/dev/null
-        continue-on-error: true
+          echo "=== All APK files ==="
+          find . -name "*.apk" -type f 2>/dev/null || echo "No APK found"
+          echo "=== Build directory tree ==="
+          find build -type f -name "*.apk" 2>/dev/null || echo "No files in build/"
+          find app/build -type f -name "*.apk" 2>/dev/null || echo "No files in app/build/"
+          echo "=== Full build tree ==="
+          find build -type f 2>/dev/null | head -50
 
       - name: Upload debug APK artifact
-        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: debug-apk
@@ -75,12 +64,15 @@ jobs:
       - name: Summary
         if: always()
         run: |
+          APK=$(find . -name "*.apk" -type f 2>/dev/null | head -1)
           echo "## Build Result" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          if [ -f build/app/outputs/flutter-apk/app-debug.apk ]; then
-            echo "✅ **APK built successfully!** Download from Artifacts tab." >> $GITHUB_STEP_SUMMARY
+          if [ -n "$APK" ]; then
+            echo "✅ **APK built successfully!**" >> $GITHUB_STEP_SUMMARY
+            echo "Path: \`$APK\`" >> $GITHUB_STEP_SUMMARY
+            echo "Size: $(du -h "$APK" | cut -f1)" >> $GITHUB_STEP_SUMMARY
           else
-            echo "❌ **Build failed.** Download build-log.txt from Artifacts for details." >> $GITHUB_STEP_SUMMARY
+            echo "❌ **No APK found.** Check build output above." >> $GITHUB_STEP_SUMMARY
           fi
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
