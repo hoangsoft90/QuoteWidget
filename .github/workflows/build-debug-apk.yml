@@ -53,12 +53,22 @@ jobs:
           path: build-log.txt
           retention-days: 7
 
+      - name: Find and upload APK
+        if: success()
+        run: |
+          echo "=== Searching for APK files ==="
+          find . -name "*.apk" -type f 2>/dev/null
+          echo "=== Build outputs ==="
+          find . -path "*/build/outputs/*" -type f 2>/dev/null
+        continue-on-error: true
+
       - name: Upload debug APK artifact
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: debug-apk
-          path: build/app/outputs/flutter-apk/app-debug.apk
+          path: |
+            **/*.apk
           retention-days: 7
           if-no-files-found: warn
 
