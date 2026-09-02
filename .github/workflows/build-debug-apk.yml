@@ -39,41 +39,47 @@ jobs:
         run: flutter test --no-pub || true
 
       - name: Build debug APK
-        run: flutter build apk --debug
+        run: flutter build apk --debug --verbose 2>&1 | tee build-output.txt
+        continue-on-error: true
 
-      - name: List all build outputs
+      - name: List APK files
         if: always()
         run: |
-          echo "=== All APK files ==="
-          find . -name "*.apk" -type f 2>/dev/null || echo "No APK found"
-          echo "=== Build directory tree ==="
-          find build -type f -name "*.apk" 2>/dev/null || echo "No files in build/"
-          find app/build -type f -name "*.apk" 2>/dev/null || echo "No files in app/build/"
-          echo "=== Full build tree ==="
-          find build -type f 2>/dev/null | head -50
+          echo "=== APK search ==="
+          find . -name "*.apk" -type f 2>/dev/null || echo "NONE"
+          echo "=== build/ tree ==="
+          find build -type f 2>/dev/null | head -30 || echo "No build/ dir"
+          echo "=== Last 50 lines of build output ==="
+          tail -50 build-output.txt 2>/dev/null || echo "No build output"
 
-      - name: Upload debug APK artifact
+      - name: Upload build output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-output
+          path: build-output.txt
+          retention-days: 7
+
+      - name: Upload debug APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: debug-apk
-          path: |
-            **/*.apk
+          path: "**/*.apk"
           retention-days: 7
           if-no-files-found: warn
 
-      - name: Summary
+      - name: Check build result
         if: always()
         run: |
           APK=$(find . -name "*.apk" -type f 2>/dev/null | head -1)
-          echo "## Build Result" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
           if [ -n "$APK" ]; then
-            echo "✅ **APK built successfully!**" >> $GITHUB_STEP_SUMMARY
-            echo "Path: \`$APK\`" >> $GITHUB_STEP_SUMMARY
-            echo "Size: $(du -h "$APK" | cut -f1)" >> $GITHUB_STEP_SUMMARY
+            echo "✅ APK found: $APK ($(du -h "$APK" | cut -f1))"
+            exit 0
           else
-            echo "❌ **No APK found.** Check build output above." >> $GITHUB_STEP_SUMMARY
+            echo "❌ No APK found"
+            echo ""
+            echo "=== Last 100 lines of build output ==="
+            tail -100 build-output.txt 2>/dev/null
+            exit 1
           fi
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
