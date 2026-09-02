@@ -60,6 +60,18 @@ jobs:
           echo "Build failed with exit code ${{ steps.build.outputs.exit_code }}"
           exit 1
 
+      - name: Find APK file
+        if: steps.build.outputs.exit_code == '0'
+        run: |
+          echo "=== Looking for APK ==="
+          find android/app/build -name "*.apk" -type f 2>/dev/null || echo "No APK in android/app/build"
+          echo "=== Full outputs tree ==="
+          find android/app/build/outputs -type f 2>/dev/null || echo "No outputs dir"
+          echo "=== Build dir contents ==="
+          ls -la android/app/build/outputs/apk/debug/ 2>/dev/null || echo "No debug apk dir"
+          # Also check the flutter output path
+          find build -name "*.apk" -type f 2>/dev/null || echo "No APK in build/"
+
       - name: Upload build log
         if: always()
         uses: actions/upload-artifact@v4
@@ -68,22 +80,12 @@ jobs:
           path: build-output.txt
           if-no-files-found: warn
 
-      - name: Find and upload APK
-        if: steps.build.outputs.exit_code == '0'
-        run: |
-          APK=$(find android/app/build -name "*.apk" -type f 2>/dev/null | head -1)
-          echo "APK=$APK" >> "$GITHUB_OUTPUT"
-          if [ -n "$APK" ]; then
-            echo "## ✅ APK Built" >> $GITHUB_STEP_SUMMARY
-            echo "Path: \`$APK\` ($(du -h "$APK" | cut -f1))" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "## ❌ No APK found" >> $GITHUB_STEP_SUMMARY
-          fi
-
       - name: Upload APK artifact
         if: steps.build.outputs.exit_code == '0'
         uses: actions/upload-artifact@v4
         with:
           name: debug-apk
-          path: android/app/build/outputs/apk/debug/*.apk
+          path: |
+            android/app/build/outputs/apk/debug/*.apk
+            android/app/build/outputs/**/*.apk
           if-no-files-found: warn
