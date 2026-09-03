@@ -58,7 +58,11 @@
 
 ## Do NOT
 
-- Do not add INTERNET permission (offline-first by design)
+- Do not REMOVE INTERNET permission (required by google_mobile_ads — ads are
+  the primary monetization path; app data itself stays offline-first)
+- Do not disable TEST_ADS for normal dev builds (real units → AdMob can limit
+  the account; flip with --dart-define=TEST_ADS=false only for release testing)
+- Do not build APKs locally — builds run on GitHub Actions only
 - Do not use `share_handler` package (unmaintained, custom bridge is sufficient)
 - Do not auto-configure Pro widgets (all widgets start with "Tap to set up")
 - Do not use `PreferenceManager.getDefaultSharedPreferences()` in Kotlin (wrong file)

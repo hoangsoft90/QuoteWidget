@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
+import 'ad_config.dart';
 import 'iap_service.dart';
 
 /// Rewarded-ad service — the PRIMARY monetization path.
@@ -8,12 +9,9 @@ import 'iap_service.dart';
 /// [showRewardedAd] plays it. When the user watches it to the end, the reward
 /// callback fires and we call [IapService.unlockProFor24h].
 ///
-/// Ad unit ID: use a real AdMob rewarded unit in production. The value below
-/// is Google's official **test** unit, which always serves a test ad.
+/// The unit ID comes from [AdConfig] — test units by default (TEST_ADS=true),
+/// real units once TEST_ADS is flipped off for production.
 class RewardedAdService {
-  static const String _rewardedAdUnitId =
-      'ca-app-pub-3940256099942544/5224354917';
-
   final IapService iapService;
 
   RewardedAd? _rewardedAd;
@@ -31,13 +29,14 @@ class RewardedAdService {
 
   /// Load a rewarded ad. Call on app open; re-call after each show.
   Future<void> loadRewardedAd() async {
-    if (_isLoading || _rewardedAd != null) return;
+    // Skip in tests / when ads are disabled — never hit platform channels.
+    if (!AdConfig.supported || _isLoading || _rewardedAd != null) return;
 
     _isLoading = true;
     try {
       await RewardedAd.load(
-        adUnitId: _rewardedAdUnitId,
-        request: const AdRequest(),
+        adUnitId: AdConfig.rewardedUnitId,
+        request: AdRequest(extras: AdConfig.nonPersonalizedExtras),
         rewardedAdLoadCallback: RewardedAdLoadCallback(
           onAdLoaded: (ad) {
             _rewardedAd = ad;

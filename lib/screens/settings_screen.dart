@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../services/backup_service.dart';
 import '../services/iap_service.dart';
+import '../services/interstitial_ad_service.dart';
 import '../services/rewarded_ad_service.dart';
+import '../services/snapshot_manager.dart';
 import '../services/storage_service.dart';
 import '../services/widget_service.dart';
+import 'backup_screen.dart';
 import 'recently_deleted_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -11,6 +15,9 @@ class SettingsScreen extends StatefulWidget {
   final RewardedAdService rewardedAdService;
   final StorageService storageService;
   final WidgetService widgetService;
+  final BackupService backupService;
+  final SnapshotManager snapshotManager;
+  final InterstitialAdController interstitialAdController;
 
   const SettingsScreen({
     super.key,
@@ -18,6 +25,9 @@ class SettingsScreen extends StatefulWidget {
     required this.rewardedAdService,
     required this.storageService,
     required this.widgetService,
+    required this.backupService,
+    required this.snapshotManager,
+    required this.interstitialAdController,
   });
 
   @override
@@ -157,6 +167,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   builder: (context) => RecentlyDeletedScreen(
                     storageService: widget.storageService,
                     widgetService: widget.widgetService,
+                    interstitialAdController: widget.interstitialAdController,
+                  ),
+                ),
+              );
+            },
+          ),
+
+          const Divider(),
+
+          // Backup & Restore (export/import + safety snapshots)
+          ListTile(
+            leading: const Icon(Icons.backup_outlined),
+            title: const Text('Backup & Restore'),
+            subtitle: const Text('Export, import, and safety snapshots'),
+            trailing: const Icon(Icons.chevron_right, size: 18),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => BackupScreen(
+                    backupService: widget.backupService,
+                    snapshotManager: widget.snapshotManager,
+                    storageService: widget.storageService,
+                    interstitialAdController: widget.interstitialAdController,
                   ),
                 ),
               );

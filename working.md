@@ -3,8 +3,40 @@
 ## Current Status
 
 **Phase:** Sprint-next (prompt_sprint_next.md) P0→P0.5→P1 complete — Tasks 1-7 done
-**Next:** CI build verify (run 33708833890) + real-device test of ads/share/theme flows
-**Blocker:** None — 65/65 tests pass, analyze clean
+**Next:** CI build verify on GH Actions (2026-09-03 changes) + real-device test
+**Blocker:** None — 71/71 tests pass, analyze clean
+
+### [2026-09-03] Release-prep batch (ads thật + SDK36 + cleartext + icon + Sentry + nav)
+- **AdMob production setup:** real App ID in manifest
+  (`ca-app-pub-6917313063209470~9587990603`), real banner
+  (`…/1409128007`) + interstitial (`…/1569899782`) unit IDs in new
+  `lib/services/ad_config.dart` with dart-define flags `ENABLE_ADS` (default
+  true) + `TEST_ADS` (default TRUE — test/sample units, tránh AdMob limit khi
+  test). Banner trên Home (free tier) + interstitial sau destructive actions
+  (delete-forever, overwrite restore) — `InterstitialAdController`
+  (frequency 5 + 5-min cooldown, `shouldShowInterstitial` pure fn).
+  google_mobile_ads ^5.3.1 → ^9.0.0.
+- **targetSdk 36 + SDK setup:** compileSdk=36/targetSdk=36 pinned explicit
+  (Play yêu cầu API 36 từ 31/8/2026); AGP 8.9.1 + Gradle 8.11.1 + Kotlin
+  1.9.22 (AGP 9 built-in Kotlin incompatible với sentry_flutter language
+  version 1.6 → revert). NDK 28.2.13676358 + platforms 34/35/36 installed
+  local; ~/.gradle relocated to /opt (full disk).
+- **Cleartext HTTP:** `res/xml/network_security_config.xml`
+  (base-config cleartextTrafficPermitted=true) + manifest attribute — http
+  hoạt động trong release APK (app có INTERNET cho ads).
+- **App icon:** adaptive (gradient bg + format_quote foreground vector,
+  mipmap-anydpi-v26) + legacy PNGs regenerate (PIL).
+- **Sentry:** `sentry_flutter ^8.14.2`, init đầu main.dart + manifest
+  `io.sentry.dsn` (native crashes).
+- **Safe area:** banner thêm bottom inset (MediaQuery.paddingOf.bottom) —
+  không bị Android 3-button nav bar che (edge-to-edge targetSdk 36).
+- **Nav review:** BackupScreen chưa có entry point (dead end) → thêm tile
+  "Backup & Restore" trong Settings; fix deep-link edge case: WidgetSetupScreen
+  cold-start root → `canPop()==false` → pushReplacement Home (trước đó pop
+  root → black screen).
+- **CI:** workflow Flutter 3.32.4 → 3.47.1, thêm `flutter analyze` + build
+  release APK step (2 artifacts). KHÔNG build local — chỉ GH Actions.
+- Tests: +6 `test/interstitial_ad_test.dart` (65 → 71).
 
 ## Recent Activity
 

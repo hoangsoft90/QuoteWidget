@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../services/backup_service.dart';
+import '../services/interstitial_ad_service.dart';
+import '../services/snapshot_manager.dart';
 import '../services/storage_service.dart';
 import '../services/widget_service.dart';
 import '../services/iap_service.dart';
@@ -16,6 +19,9 @@ class OnboardingScreen extends StatefulWidget {
   final WidgetService widgetService;
   final IapService iapService;
   final RewardedAdService rewardedAdService;
+  final InterstitialAdController interstitialAdController;
+  final BackupService backupService;
+  final SnapshotManager snapshotManager;
 
   const OnboardingScreen({
     super.key,
@@ -23,6 +29,9 @@ class OnboardingScreen extends StatefulWidget {
     required this.widgetService,
     required this.iapService,
     required this.rewardedAdService,
+    required this.interstitialAdController,
+    required this.backupService,
+    required this.snapshotManager,
   });
 
   @override
@@ -41,6 +50,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           widgetService: widget.widgetService,
           iapService: widget.iapService,
           rewardedAdService: widget.rewardedAdService,
+          interstitialAdController: widget.interstitialAdController,
+          backupService: widget.backupService,
+          snapshotManager: widget.snapshotManager,
         ),
       ),
     );
@@ -80,6 +92,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                           storageService: widget.storageService,
                           iapService: widget.iapService,
                           rewardedAdService: widget.rewardedAdService,
+                          interstitialAdController: widget.interstitialAdController,
+                          backupService: widget.backupService,
+                          snapshotManager: widget.snapshotManager,
                         ),
                       ),
                     );
@@ -106,6 +121,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             widgetService: widget.widgetService,
             iapService: widget.iapService,
             rewardedAdService: widget.rewardedAdService,
+            interstitialAdController: widget.interstitialAdController,
+            backupService: widget.backupService,
+            snapshotManager: widget.snapshotManager,
           ),
         ),
       );

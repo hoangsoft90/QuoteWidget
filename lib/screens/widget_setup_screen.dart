@@ -2,12 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/collection_model.dart';
 import '../models/widget_config_model.dart';
+import '../services/backup_service.dart';
+import '../services/interstitial_ad_service.dart';
+import '../services/snapshot_manager.dart';
 import '../services/storage_service.dart';
 import '../services/widget_service.dart';
 import '../services/widget_data_bridge.dart';
 import '../services/iap_service.dart';
 import '../services/rewarded_ad_service.dart';
 import 'collection_detail_screen.dart';
+import 'home_screen.dart';
 import 'package:home_widget/home_widget.dart';
 
 /// Screen shown when user taps an unconfigured/empty widget on Home Screen.
@@ -24,6 +28,9 @@ class WidgetSetupScreen extends StatefulWidget {
   final WidgetService widgetService;
   final IapService iapService;
   final RewardedAdService rewardedAdService;
+  final InterstitialAdController interstitialAdController;
+  final BackupService backupService;
+  final SnapshotManager snapshotManager;
 
   const WidgetSetupScreen({
     super.key,
@@ -33,6 +40,9 @@ class WidgetSetupScreen extends StatefulWidget {
     required this.widgetService,
     required this.iapService,
     required this.rewardedAdService,
+    required this.interstitialAdController,
+    required this.backupService,
+    required this.snapshotManager,
   });
 
   @override
@@ -154,7 +164,26 @@ class _WidgetSetupScreenState extends State<WidgetSetupScreen> {
     await prefs.remove('tapped_widget_id');
 
     if (mounted) {
-      Navigator.of(context).pop();
+      if (Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      } else {
+        // Cold-start deep link: this screen IS the root route. Popping it
+        // would leave an empty Navigator (black screen) — replace with Home
+        // instead so the user always has a screen to return to.
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            builder: (context) => HomeScreen(
+              storageService: widget.storageService,
+              widgetService: widget.widgetService,
+              iapService: widget.iapService,
+              rewardedAdService: widget.rewardedAdService,
+              interstitialAdController: widget.interstitialAdController,
+              backupService: widget.backupService,
+              snapshotManager: widget.snapshotManager,
+            ),
+          ),
+        );
+      }
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Widget configured!')),
       );

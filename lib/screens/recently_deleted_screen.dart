@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/collection_model.dart';
 import '../models/item_model.dart';
+import '../services/interstitial_ad_service.dart';
 import '../services/storage_service.dart';
 import '../services/widget_service.dart';
 
@@ -12,11 +13,13 @@ import '../services/widget_service.dart';
 class RecentlyDeletedScreen extends StatefulWidget {
   final StorageService storageService;
   final WidgetService widgetService;
+  final InterstitialAdController interstitialAdController;
 
   const RecentlyDeletedScreen({
     super.key,
     required this.storageService,
     required this.widgetService,
+    required this.interstitialAdController,
   });
 
   @override
@@ -79,6 +82,8 @@ class _RecentlyDeletedScreenState extends State<RecentlyDeletedScreen> {
     );
     if (confirmed != true) return;
     await widget.storageService.permanentlyDeleteCollection(collection.id);
+    // Destructive action → may trigger an interstitial (frequency-gated).
+    widget.interstitialAdController.onDestructiveAction();
     if (mounted) _load();
   }
 
@@ -109,6 +114,8 @@ class _RecentlyDeletedScreenState extends State<RecentlyDeletedScreen> {
     );
     if (confirmed != true) return;
     await widget.storageService.permanentlyDeleteItem(item.id);
+    // Destructive action → may trigger an interstitial (frequency-gated).
+    widget.interstitialAdController.onDestructiveAction();
     if (mounted) _load();
   }
 

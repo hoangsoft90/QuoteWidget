@@ -1,19 +1,22 @@
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
-import '../services/storage_service.dart';
 import '../services/backup_service.dart';
+import '../services/interstitial_ad_service.dart';
 import '../services/snapshot_manager.dart';
+import '../services/storage_service.dart';
 
 class BackupScreen extends StatefulWidget {
   final BackupService backupService;
   final SnapshotManager snapshotManager;
   final StorageService storageService;
+  final InterstitialAdController interstitialAdController;
 
   const BackupScreen({
     super.key,
     required this.backupService,
     required this.snapshotManager,
     required this.storageService,
+    required this.interstitialAdController,
   });
 
   @override
@@ -97,6 +100,11 @@ class _BackupScreenState extends State<BackupScreen> {
           overwrite: mode == 'overwrite',
         );
 
+        if (importResult.success && mode == 'overwrite' && mounted) {
+          // Overwrite restore replaces all data — a destructive action that
+          // may trigger an interstitial (frequency-gated).
+          widget.interstitialAdController.onDestructiveAction();
+        }
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -185,6 +193,9 @@ class _BackupScreenState extends State<BackupScreen> {
     if (confirmed == true) {
       try {
         await widget.snapshotManager.restoreFromSnapshot(snapshot.path, widget.storageService);
+        // Destructive action (replaces current data) — may trigger an
+        // interstitial (frequency-gated).
+        widget.interstitialAdController.onDestructiveAction();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(

@@ -99,7 +99,8 @@ Android Home Screen — displays widget
 ## Key Business Rules
 
 - Free tier: unlimited items + 1 widget
-- Pro tier: unlimited widgets ($3.99–4.99, one-time purchase)
-- No INTERNET permission (offline-first)
-- No data collection, no cloud sync
+- Pro tier: unlimited widgets (24h rewarded-ad unlock + one-time IAP "Remove Ads Forever")
+- INTERNET permission present (google_mobile_ads — rewarded/banner/interstitial);
+  cleartext http allowed via res/xml/network_security_config.xml (some http links)
+- No data collection, no cloud sync; ads serve non-personalized (npa=1)
 - Safety snapshot before destructive operations (cascade-delete, overwrite restore)

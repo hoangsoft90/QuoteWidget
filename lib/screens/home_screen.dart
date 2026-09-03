@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import '../models/collection_model.dart';
+import '../services/backup_service.dart';
+import '../services/snapshot_manager.dart';
 import '../services/storage_service.dart';
 import '../services/widget_service.dart';
 import '../services/iap_service.dart';
+import '../services/interstitial_ad_service.dart';
 import '../services/rewarded_ad_service.dart';
+import '../widgets/banner_ad_view.dart';
 import 'collection_detail_screen.dart';
 import 'settings_screen.dart';
 
@@ -12,6 +16,9 @@ class HomeScreen extends StatefulWidget {
   final WidgetService widgetService;
   final IapService iapService;
   final RewardedAdService rewardedAdService;
+  final InterstitialAdController interstitialAdController;
+  final BackupService backupService;
+  final SnapshotManager snapshotManager;
 
   const HomeScreen({
     super.key,
@@ -19,6 +26,9 @@ class HomeScreen extends StatefulWidget {
     required this.widgetService,
     required this.iapService,
     required this.rewardedAdService,
+    required this.interstitialAdController,
+    required this.backupService,
+    required this.snapshotManager,
   });
 
   @override
@@ -139,6 +149,9 @@ class _HomeScreenState extends State<HomeScreen> {
                     rewardedAdService: widget.rewardedAdService,
                     storageService: widget.storageService,
                     widgetService: widget.widgetService,
+                    backupService: widget.backupService,
+                    snapshotManager: widget.snapshotManager,
+                    interstitialAdController: widget.interstitialAdController,
                   ),
                 ),
               );
@@ -147,11 +160,21 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : _collections.isEmpty
-              ? _buildEmptyState()
-              : _buildCollectionList(),
+      body: Column(
+        children: [
+          Expanded(
+            child: _isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : _collections.isEmpty
+                    ? _buildEmptyState()
+                    : _buildCollectionList(),
+          ),
+          // Banner ad at the bottom (free tier only; hidden for Pro). The
+          // widget itself adds the system bottom inset so it stays clear of
+          // the Android 3-button navigation bar.
+          BannerAdView(iapService: widget.iapService),
+        ],
+      ),
       floatingActionButton: FloatingActionButton(
         onPressed: _showCreateCollectionDialog,
         child: const Icon(Icons.add),

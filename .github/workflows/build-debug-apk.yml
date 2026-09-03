@@ -22,7 +22,10 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.32.4'
+          # Must be a Flutter whose Gradle plugin defaults compileSdk >= 36
+          # (the project pins compileSdk/targetSdk 36 for Google Play's
+          # 2026-08-31 API-36 requirement).
+          flutter-version: '3.47.1'
           channel: 'stable'
 
       - name: Flutter & Dart versions
@@ -34,6 +37,9 @@ jobs:
         run: |
           rm -f pubspec.lock
           flutter pub get
+
+      - name: Analyze
+        run: flutter analyze --no-pub
 
       - name: Run tests
         run: flutter test --no-pub 2>&1 | tail -10
@@ -71,4 +77,31 @@ jobs:
         with:
           name: debug-apk
           path: build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: warn
+
+      - name: Build release APK
+        id: build-release
+        run: |
+          flutter build apk --release --no-pub 2>&1 | tee build-release-output.txt
+          echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+
+      - name: Show release build output
+        if: always()
+        run: |
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          tail -50 build-release-output.txt 2>/dev/null >> $GITHUB_STEP_SUMMARY || echo "No build output" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Fail if release build failed
+        if: steps.build-release.outputs.exit_code != '0'
+        run: |
+          echo "Release build failed with exit code ${{ steps.build-release.outputs.exit_code }}"
+          exit 1
+
+      - name: Upload release APK artifact
+        if: steps.build-release.outputs.exit_code == '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: warn

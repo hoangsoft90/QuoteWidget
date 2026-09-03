@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/collection_model.dart';
 import '../models/widget_config_model.dart';
+import '../services/backup_service.dart';
+import '../services/interstitial_ad_service.dart';
+import '../services/snapshot_manager.dart';
 import '../services/storage_service.dart';
 import '../services/widget_service.dart';
 import '../services/iap_service.dart';
@@ -20,6 +23,9 @@ class UseCaseSelectionScreen extends StatefulWidget {
   final WidgetService widgetService;
   final IapService iapService;
   final RewardedAdService rewardedAdService;
+  final InterstitialAdController interstitialAdController;
+  final BackupService backupService;
+  final SnapshotManager snapshotManager;
 
   const UseCaseSelectionScreen({
     super.key,
@@ -27,6 +33,9 @@ class UseCaseSelectionScreen extends StatefulWidget {
     required this.widgetService,
     required this.iapService,
     required this.rewardedAdService,
+    required this.interstitialAdController,
+    required this.backupService,
+    required this.snapshotManager,
   });
 
   @override
@@ -88,6 +97,9 @@ class _UseCaseSelectionScreenState extends State<UseCaseSelectionScreen> {
           storageService: widget.storageService,
           iapService: widget.iapService,
           rewardedAdService: widget.rewardedAdService,
+          interstitialAdController: widget.interstitialAdController,
+          backupService: widget.backupService,
+          snapshotManager: widget.snapshotManager,
         ),
       ),
     );

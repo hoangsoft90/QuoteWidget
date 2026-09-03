@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:sentry_flutter/sentry_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'services/storage_service.dart';
 import 'services/widget_service.dart';
 import 'services/backup_service.dart';
 import 'services/share_service.dart';
 import 'services/snapshot_manager.dart';
+import 'services/ad_config.dart';
 import 'services/iap_service.dart';
+import 'services/interstitial_ad_service.dart';
 import 'services/rewarded_ad_service.dart';
 import 'services/toast_service.dart';
 import 'screens/home_screen.dart';
@@ -15,6 +18,17 @@ import 'screens/widget_setup_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Sentry crash/error reporting (Flutter + native Android via manifest DSN).
+  // init is awaited FIRST so errors in the service setup below are captured.
+  await SentryFlutter.init(
+    (options) {
+      options.dsn =
+          'https://a387c41f7f60045b744b5d112f3adbef@o4505474077753344.ingest.us.sentry.io/4512011826364416';
+      // Errors are always reported; tracing (performance) is off for now.
+      options.tracesSampleRate = 0.0;
+    },
+  );
 
   // Initialize storage service
   final storageService = StorageService();
@@ -40,11 +54,14 @@ void main() async {
 
   // Init rewarded ads (primary monetization path)
   final rewardedAdService = RewardedAdService(iapService);
-  try {
-    await RewardedAdService.initMobileAds();
-    await rewardedAdService.loadRewardedAd();
-  } catch (_) {
-    // Ads unavailable (no Play Services / no network) — non-fatal.
+  final interstitialAdController = InterstitialAdController();
+  if (AdConfig.supported) {
+    try {
+      await RewardedAdService.initMobileAds();
+      await rewardedAdService.loadRewardedAd();
+    } catch (_) {
+      // Ads unavailable (no Play Services / no network) — non-fatal.
+    }
   }
 
   // Check if first launch
@@ -93,6 +110,7 @@ void main() async {
     snapshotManager: snapshotManager,
     iapService: iapService,
     rewardedAdService: rewardedAdService,
+    interstitialAdController: interstitialAdController,
     onboardingComplete: onboardingComplete,
     pendingShareText: pendingShareText,
     tappedWidgetId: tappedWidgetId,
@@ -107,6 +125,7 @@ class QuoteWidgetApp extends StatefulWidget {
   final SnapshotManager snapshotManager;
   final IapService iapService;
   final RewardedAdService rewardedAdService;
+  final InterstitialAdController interstitialAdController;
   final bool onboardingComplete;
   final String? pendingShareText;
   final int? tappedWidgetId;
@@ -120,6 +139,7 @@ class QuoteWidgetApp extends StatefulWidget {
     required this.snapshotManager,
     required this.iapService,
     required this.rewardedAdService,
+    required this.interstitialAdController,
     required this.onboardingComplete,
     this.pendingShareText,
     this.tappedWidgetId,
@@ -177,6 +197,9 @@ class _QuoteWidgetAppState extends State<QuoteWidgetApp> with WidgetsBindingObse
           widgetService: widget.widgetService,
           iapService: widget.iapService,
           rewardedAdService: widget.rewardedAdService,
+          interstitialAdController: widget.interstitialAdController,
+          backupService: widget.backupService,
+          snapshotManager: widget.snapshotManager,
         ),
       ),
     );
@@ -267,6 +290,9 @@ class _QuoteWidgetAppState extends State<QuoteWidgetApp> with WidgetsBindingObse
               widgetService: widget.widgetService,
               iapService: widget.iapService,
               rewardedAdService: widget.rewardedAdService,
+              interstitialAdController: widget.interstitialAdController,
+              backupService: widget.backupService,
+              snapshotManager: widget.snapshotManager,
             )
           : widget.onboardingComplete
               ? HomeScreen(
@@ -274,12 +300,18 @@ class _QuoteWidgetAppState extends State<QuoteWidgetApp> with WidgetsBindingObse
                   widgetService: widget.widgetService,
                   iapService: widget.iapService,
                   rewardedAdService: widget.rewardedAdService,
+                  interstitialAdController: widget.interstitialAdController,
+                  backupService: widget.backupService,
+                  snapshotManager: widget.snapshotManager,
                 )
               : OnboardingScreen(
                   storageService: widget.storageService,
                   widgetService: widget.widgetService,
                   iapService: widget.iapService,
                   rewardedAdService: widget.rewardedAdService,
+                  interstitialAdController: widget.interstitialAdController,
+                  backupService: widget.backupService,
+                  snapshotManager: widget.snapshotManager,
                 ),
     );
   }

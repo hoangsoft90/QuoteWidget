@@ -5,12 +5,22 @@
     <application
         android:label="Your Words"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
-        <!-- AdMob App ID. TODO: replace with the real AdMob App ID before
-             store submission (currently Google's official test App ID). -->
+        android:icon="@mipmap/ic_launcher"
+        android:usesCleartextTraffic="true"
+        android:networkSecurityConfig="@xml/network_security_config">
+        <!-- Real AdMob App ID (registered for com.quotewidget.quotewidget).
+             The TEST_ADS dart-define swaps ad UNIT ids to Google's sample
+             units at runtime — the manifest App ID stays the real one.
+             Required for release builds to serve ads. -->
         <meta-data
             android:name="com.google.android.gms.ads.APPLICATION_ID"
-            android:value="ca-app-pub-3940256099942544~3347511713" />
+            android:value="ca-app-pub-6917313063209470~9587990603" />
+        <!-- Sentry DSN — captures native (Kotlin) crashes in the Android SDK
+             before/independently of the Flutter init. DSN is public by design
+             (embedded in every client build). -->
+        <meta-data
+            android:name="io.sentry.dsn"
+            android:value="https://a387c41f7f60045b744b5d112f3adbef@o4505474077753344.ingest.us.sentry.io/4512011826364416" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

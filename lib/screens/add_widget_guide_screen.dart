@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import '../services/backup_service.dart';
+import '../services/interstitial_ad_service.dart';
+import '../services/snapshot_manager.dart';
 import '../services/widget_service.dart';
 import '../services/storage_service.dart';
 import '../services/iap_service.dart';
@@ -10,6 +13,9 @@ class AddWidgetGuideScreen extends StatefulWidget {
   final StorageService storageService;
   final IapService iapService;
   final RewardedAdService rewardedAdService;
+  final InterstitialAdController interstitialAdController;
+  final BackupService backupService;
+  final SnapshotManager snapshotManager;
 
   const AddWidgetGuideScreen({
     super.key,
@@ -17,6 +23,9 @@ class AddWidgetGuideScreen extends StatefulWidget {
     required this.storageService,
     required this.iapService,
     required this.rewardedAdService,
+    required this.interstitialAdController,
+    required this.backupService,
+    required this.snapshotManager,
   });
 
   @override
@@ -77,6 +86,9 @@ class _AddWidgetGuideScreenState extends State<AddWidgetGuideScreen> {
           widgetService: widget.widgetService,
           iapService: widget.iapService,
           rewardedAdService: widget.rewardedAdService,
+          interstitialAdController: widget.interstitialAdController,
+          backupService: widget.backupService,
+          snapshotManager: widget.snapshotManager,
         ),
       ),
     );
