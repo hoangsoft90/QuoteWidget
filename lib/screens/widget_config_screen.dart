@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/widget_config_model.dart';
 import '../models/collection_model.dart';
+import '../models/widget_theme.dart';
 import '../services/storage_service.dart';
 import '../services/widget_service.dart';
 import '../widgets/widget_preview.dart';
@@ -45,6 +46,7 @@ class _WidgetConfigScreenState extends State<WidgetConfigScreen> {
   }
 
   void _updateTheme(String theme) {
+    final curated = curatedThemeById(theme);
     AppearanceConfig newAppearance;
     switch (theme) {
       case 'light':
@@ -54,7 +56,17 @@ class _WidgetConfigScreenState extends State<WidgetConfigScreen> {
         newAppearance = AppearanceConfig.dark();
         break;
       default:
-        newAppearance = _appearance;
+        if (curated != null) {
+          // Curated theme: store its id + canonical colors so the native
+          // widget renders the same gradient (Kotlin maps id → drawable).
+          newAppearance = AppearanceConfig(
+            theme: curated.id,
+            textColor: curated.textColor,
+            background: curated.backgroundColor,
+          );
+        } else {
+          newAppearance = _appearance;
+        }
         break;
     }
     newAppearance.fontSize = _appearance.fontSize;
@@ -201,6 +213,7 @@ class _WidgetConfigScreenState extends State<WidgetConfigScreen> {
   }
 
   Widget _buildThemePresets() {
+    // Light, Dark, Custom + the 6 fixed curated themes.
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -211,41 +224,118 @@ class _WidgetConfigScreenState extends State<WidgetConfigScreen> {
               ),
         ),
         const SizedBox(height: 8),
-        Row(
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
           children: [
-            _buildThemeButton('Light', 'light', Icons.light_mode),
-            const SizedBox(width: 8),
-            _buildThemeButton('Dark', 'dark', Icons.dark_mode),
-            const SizedBox(width: 8),
-            _buildThemeButton('Custom', 'custom', Icons.palette),
+            _buildThemeButton('Light', 'light', Icons.light_mode,
+                const Color(0xFFFFFFFF)),
+            _buildThemeButton('Dark', 'dark', Icons.dark_mode,
+                const Color(0xFF1A1A1A)),
+            // Custom keeps manual color pickers below.
+            _buildThemeButton('Custom', 'custom', Icons.palette, null),
+            for (final theme in kCuratedThemes)
+              _buildThemeChip(theme),
           ],
         ),
+        if (_appearance.theme != 'light' &&
+            _appearance.theme != 'dark' &&
+            _appearance.theme != 'custom' &&
+            curatedThemeById(_appearance.theme) == null) ...[
+          const SizedBox(height: 4),
+          Text(
+            'Custom colors are applied — pick a curated theme to reset.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context)
+                      .colorScheme
+                      .onSurface
+                      .withValues(alpha: 0.6),
+                ),
+          ),
+        ],
       ],
     );
   }
 
-  Widget _buildThemeButton(String label, String theme, IconData icon) {
+  Widget _buildThemeButton(String label, String theme, IconData icon,
+      Color? swatchColor) {
     final isSelected = _appearance.theme == theme;
-    return Expanded(
-      child: OutlinedButton.icon(
-        onPressed: () => _updateTheme(theme),
-        icon: Icon(
-          icon,
-          color: isSelected ? Theme.of(context).colorScheme.primary : null,
+    return OutlinedButton.icon(
+      onPressed: () => _updateTheme(theme),
+      icon: swatchColor != null
+          ? Container(
+              width: 14,
+              height: 14,
+              decoration: BoxDecoration(
+                color: swatchColor,
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.grey.shade400),
+              ),
+            )
+          : Icon(
+              icon,
+              color: isSelected
+                  ? Theme.of(context).colorScheme.primary
+                  : null,
+            ),
+      label: Text(
+        label,
+        style: TextStyle(
+          color:
+              isSelected ? Theme.of(context).colorScheme.primary : null,
         ),
-        label: Text(
-          label,
-          style: TextStyle(
-            color: isSelected ? Theme.of(context).colorScheme.primary : null,
-          ),
+      ),
+      style: OutlinedButton.styleFrom(
+        side: BorderSide(
+          color: isSelected
+              ? Theme.of(context).colorScheme.primary
+              : Colors.grey,
+          width: isSelected ? 2 : 1,
         ),
-        style: OutlinedButton.styleFrom(
-          side: BorderSide(
+        visualDensity: VisualDensity.compact,
+      ),
+    );
+  }
+
+  /// A curated theme swatch — colored chip with the theme name below.
+  Widget _buildThemeChip(WidgetTheme theme) {
+    final isSelected = _appearance.theme == theme.id;
+    return InkWell(
+      onTap: () => _updateTheme(theme.id),
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        width: 64,
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        decoration: BoxDecoration(
+          color: Color(theme.backgroundColor),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
             color: isSelected
                 ? Theme.of(context).colorScheme.primary
-                : Colors.grey,
+                : Colors.grey.shade300,
             width: isSelected ? 2 : 1,
           ),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              theme.icon,
+              color: Color(theme.accentColor),
+              size: 18,
+            ),
+            const SizedBox(height: 2),
+            Text(
+              theme.name,
+              style: TextStyle(
+                fontSize: 10,
+                color: Color(theme.textColor),
+                fontWeight:
+                    isSelected ? FontWeight.bold : FontWeight.normal,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
         ),
       ),
     );

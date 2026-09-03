@@ -1,25 +1,28 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/storage_service.dart';
-import '../services/sample_data_service.dart';
 import '../services/widget_service.dart';
 import '../services/iap_service.dart';
+import '../services/rewarded_ad_service.dart';
 import 'home_screen.dart';
 import 'add_widget_guide_screen.dart';
 import 'onboarding_create_collection_screen.dart';
 import 'onboarding_add_item_screen.dart';
+import 'use_case_selection_screen.dart';
 import '../widgets/onboarding_progress.dart';
 
 class OnboardingScreen extends StatefulWidget {
   final StorageService storageService;
   final WidgetService widgetService;
   final IapService iapService;
+  final RewardedAdService rewardedAdService;
 
   const OnboardingScreen({
     super.key,
     required this.storageService,
     required this.widgetService,
     required this.iapService,
+    required this.rewardedAdService,
   });
 
   @override
@@ -27,45 +30,20 @@ class OnboardingScreen extends StatefulWidget {
 }
 
 class _OnboardingScreenState extends State<OnboardingScreen> {
-  bool _isCreatingSample = false;
-
-  Future<void> _startWithSample() async {
-    setState(() {
-      _isCreatingSample = true;
-    });
-
-    try {
-      final sampleService = SampleDataService(widget.storageService);
-      await sampleService.createSampleCollections();
-
-      // Mark onboarding as complete
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool('onboarding_complete', true);
-
-      if (mounted) {
-        // Navigate to add widget guide
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (context) => AddWidgetGuideScreen(
-              widgetService: widget.widgetService,
-              storageService: widget.storageService,
-              iapService: widget.iapService,
-            ),
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to create sample content: $e')),
-        );
-      }
-    } finally {
-      setState(() {
-        _isCreatingSample = false;
-      });
-    }
+  // "Start with Sample" → ask which use case first (Task 5), then build the
+  // matching single collection + show a live preview before the widget guide.
+  void _startWithSample() {
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (context) => UseCaseSelectionScreen(
+          storageService: widget.storageService,
+          widgetService: widget.widgetService,
+          iapService: widget.iapService,
+          rewardedAdService: widget.rewardedAdService,
+        ),
+      ),
+    );
   }
 
   void _addYourOwn() async {
@@ -101,6 +79,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                           widgetService: widget.widgetService,
                           storageService: widget.storageService,
                           iapService: widget.iapService,
+                          rewardedAdService: widget.rewardedAdService,
                         ),
                       ),
                     );
@@ -126,6 +105,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             storageService: widget.storageService,
             widgetService: widget.widgetService,
             iapService: widget.iapService,
+            rewardedAdService: widget.rewardedAdService,
           ),
         ),
       );
@@ -169,20 +149,14 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
-                  onPressed: _isCreatingSample ? null : _startWithSample,
+                  onPressed: _startWithSample,
                   style: ElevatedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 16),
                   ),
-                  child: _isCreatingSample
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Text(
-                          'Start with Sample',
-                          style: TextStyle(fontSize: 16),
-                        ),
+                  child: const Text(
+                    'Start with Sample',
+                    style: TextStyle(fontSize: 16),
+                  ),
                 ),
               ),
               const SizedBox(height: 12),

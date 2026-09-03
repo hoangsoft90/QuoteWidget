@@ -92,6 +92,24 @@ class WidgetDataBridge {
     return prefs.getBool(_proStatusKey) ?? false;
   }
 
+  /// Sync Pro expiry timestamp (epoch millis) so Kotlin can self-lock when
+  /// the 24h window passes even if the app never opens again.
+  static Future<void> setProExpiry(DateTime? proUnlockedUntil) async {
+    final prefs = await SharedPreferences.getInstance();
+    final millis = proUnlockedUntil?.millisecondsSinceEpoch ?? 0;
+    await prefs.setString('is_pro_expires_at', millis.toString());
+    await prefs.setString('flutter.is_pro_expires_at', millis.toString());
+  }
+
+  /// Read the Pro expiry timestamp (epoch millis) — 0 = never unlocked.
+  static Future<int> getProExpiry() async {
+    final prefs = await SharedPreferences.getInstance();
+    final millis = int.tryParse(prefs.getString('is_pro_expires_at') ?? '') ??
+        int.tryParse(prefs.getString('flutter.is_pro_expires_at') ?? '') ??
+        0;
+    return millis;
+  }
+
   /// Update all widget fields for a given appWidgetId from a data map.
   static Future<void> syncAllWidgetData({
     required int appWidgetId,

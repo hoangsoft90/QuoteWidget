@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:home_widget/home_widget.dart';
 import 'services/storage_service.dart';
 import 'services/widget_service.dart';
 import 'services/backup_service.dart';
 import 'services/share_service.dart';
 import 'services/snapshot_manager.dart';
 import 'services/iap_service.dart';
+import 'services/rewarded_ad_service.dart';
+import 'services/toast_service.dart';
 import 'screens/home_screen.dart';
 import 'screens/onboarding_screen.dart';
 import 'screens/collection_picker_dialog.dart';
@@ -19,6 +20,9 @@ void main() async {
   final storageService = StorageService();
   await storageService.init();
 
+  // Purge trash items/collections past the 30-day retention (Task 7).
+  await storageService.purgeTrash();
+
   // Initialize other services
   final widgetService = WidgetService(storageService);
   final snapshotManager = SnapshotManager();
@@ -26,8 +30,22 @@ void main() async {
   final backupService = BackupService(storageService, snapshotManager);
   final iapService = IapService();
   await iapService.init();
-  storageService.setProStatus(iapService.isPro);
-  await HomeWidget.saveWidgetData('is_pro', iapService.isPro.toString());
+  // Live time-bound Pro provider: re-evaluates on every widget-limit check,
+  // so a 24h unlock re-locks automatically when it expires.
+  storageService.setProStatusProvider(() => iapService.isPro);
+  await widgetService.syncProStatus(
+    iapService.isPro,
+    proUnlockedUntil: iapService.proUnlockedUntil,
+  );
+
+  // Init rewarded ads (primary monetization path)
+  final rewardedAdService = RewardedAdService(iapService);
+  try {
+    await RewardedAdService.initMobileAds();
+    await rewardedAdService.loadRewardedAd();
+  } catch (_) {
+    // Ads unavailable (no Play Services / no network) — non-fatal.
+  }
 
   // Check if first launch
   final prefs = await SharedPreferences.getInstance();
@@ -74,6 +92,7 @@ void main() async {
     backupService: backupService,
     snapshotManager: snapshotManager,
     iapService: iapService,
+    rewardedAdService: rewardedAdService,
     onboardingComplete: onboardingComplete,
     pendingShareText: pendingShareText,
     tappedWidgetId: tappedWidgetId,
@@ -87,6 +106,7 @@ class QuoteWidgetApp extends StatefulWidget {
   final BackupService backupService;
   final SnapshotManager snapshotManager;
   final IapService iapService;
+  final RewardedAdService rewardedAdService;
   final bool onboardingComplete;
   final String? pendingShareText;
   final int? tappedWidgetId;
@@ -99,6 +119,7 @@ class QuoteWidgetApp extends StatefulWidget {
     required this.backupService,
     required this.snapshotManager,
     required this.iapService,
+    required this.rewardedAdService,
     required this.onboardingComplete,
     this.pendingShareText,
     this.tappedWidgetId,
@@ -154,6 +175,8 @@ class _QuoteWidgetAppState extends State<QuoteWidgetApp> with WidgetsBindingObse
           collectionId: tappedCollectionId,
           storageService: widget.storageService,
           widgetService: widget.widgetService,
+          iapService: widget.iapService,
+          rewardedAdService: widget.rewardedAdService,
         ),
       ),
     );
@@ -165,26 +188,36 @@ class _QuoteWidgetAppState extends State<QuoteWidgetApp> with WidgetsBindingObse
       final collections = widget.storageService.getAllCollections();
 
       if (collections.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Create a collection first to save shared content')),
-        );
+        // Toast (system-level) — the SnackBar would only be visible while the
+        // app UI is on screen, which is not guaranteed for share processing.
+        ToastService.show('Create a collection first to save shared content');
         return;
       }
 
+      Future<void> onSaved(bool success, String collectionName) async {
+        if (success) {
+          await ToastService.show('Saved to $collectionName');
+        } else {
+          await ToastService.show('Failed to save');
+        }
+      }
+
       if (collections.length == 1) {
-        // Auto-select the only collection
+        // Only 1 collection → save straight to it (no app-ask needed).
+        final col = collections.first;
         shareService.saveToCollection(
           text: widget.pendingShareText!,
-          collectionId: collections.first.id,
-        ).then((success) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text(success ? 'Added to ${collections.first.name}' : 'Failed to save')),
-            );
+          collectionId: col.id,
+        ).then((success) async {
+          await onSaved(success, col.name);
+          // Refresh any widget showing this collection so new content shows.
+          if (success) {
+            await widget.widgetService.updateWidgetsForCollection(col.id);
           }
         });
       } else {
-        // Show collection picker
+        // Multiple collections → ask which one (acceptable exception: opening
+        // the picker is the only unambiguous way to choose a target).
         showDialog(
           context: context,
           builder: (context) => CollectionPickerDialog(
@@ -193,11 +226,12 @@ class _QuoteWidgetAppState extends State<QuoteWidgetApp> with WidgetsBindingObse
               shareService.saveToCollection(
                 text: widget.pendingShareText!,
                 collectionId: collection.id,
-              ).then((success) {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text(success ? 'Added to ${collection.name}' : 'Failed to save')),
-                  );
+              ).then((success) async {
+                await onSaved(success, collection.name);
+                // Refresh any widget showing this collection so new content
+                // shows immediately.
+                if (success) {
+                  await widget.widgetService.updateWidgetsForCollection(collection.id);
                 }
               });
             },
@@ -231,17 +265,21 @@ class _QuoteWidgetAppState extends State<QuoteWidgetApp> with WidgetsBindingObse
               collectionId: widget.tappedCollectionId,
               storageService: widget.storageService,
               widgetService: widget.widgetService,
+              iapService: widget.iapService,
+              rewardedAdService: widget.rewardedAdService,
             )
           : widget.onboardingComplete
               ? HomeScreen(
                   storageService: widget.storageService,
                   widgetService: widget.widgetService,
                   iapService: widget.iapService,
+                  rewardedAdService: widget.rewardedAdService,
                 )
               : OnboardingScreen(
                   storageService: widget.storageService,
                   widgetService: widget.widgetService,
                   iapService: widget.iapService,
+                  rewardedAdService: widget.rewardedAdService,
                 ),
     );
   }

@@ -3,6 +3,7 @@ import '../models/collection_model.dart';
 import '../services/storage_service.dart';
 import '../services/widget_service.dart';
 import '../services/iap_service.dart';
+import '../services/rewarded_ad_service.dart';
 import 'collection_detail_screen.dart';
 import 'settings_screen.dart';
 
@@ -10,8 +11,15 @@ class HomeScreen extends StatefulWidget {
   final StorageService storageService;
   final WidgetService widgetService;
   final IapService iapService;
+  final RewardedAdService rewardedAdService;
 
-  const HomeScreen({super.key, required this.storageService, required this.widgetService, required this.iapService});
+  const HomeScreen({
+    super.key,
+    required this.storageService,
+    required this.widgetService,
+    required this.iapService,
+    required this.rewardedAdService,
+  });
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -126,7 +134,12 @@ class _HomeScreenState extends State<HomeScreen> {
               Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (context) => SettingsScreen(iapService: widget.iapService),
+                  builder: (context) => SettingsScreen(
+                    iapService: widget.iapService,
+                    rewardedAdService: widget.rewardedAdService,
+                    storageService: widget.storageService,
+                    widgetService: widget.widgetService,
+                  ),
                 ),
               );
             },

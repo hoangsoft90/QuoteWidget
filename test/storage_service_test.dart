@@ -209,7 +209,7 @@ void main() {
     });
   });
 
-  group('Widget config', () {
+  group('Widget config + time-bound Pro limit', () {
     test('createWidgetConfig creates with correct defaults', () async {
       final col = await service.createCollection('Test');
       final config = await service.createWidgetConfig(collectionId: col.id);
@@ -219,6 +219,46 @@ void main() {
       expect(config.rotationMode, RotationMode.sequential);
       expect(config.sizeCategory, SizeCategory.small);
       expect(config.showProgress, true);
+    });
+
+    test('Free 2nd widget blocked, but unblocked while 24h Pro active', () async {
+      final col = await service.createCollection('Test');
+      await service.createWidgetConfig(collectionId: col.id);
+
+      // Free: second widget must be blocked.
+      expect(
+        () => service.createWidgetConfig(collectionId: col.id),
+        throwsA(isA<WidgetLimitReachedException>()),
+      );
+
+      // Simulate a live rewarded-ad unlock still inside its 24h window.
+      var unlockedUntil = DateTime.now().add(const Duration(hours: 12));
+      service.setProStatusProvider(() =>
+          DateTime.now().isBefore(unlockedUntil));
+
+      final second = await service.createWidgetConfig(collectionId: col.id);
+      expect(second, isNotNull, reason: 'Pro within 24h window → 2nd widget OK');
+    });
+
+    test('widget limit auto-relocks when the 24h window expires', () async {
+      final col = await service.createCollection('Test');
+      await service.createWidgetConfig(collectionId: col.id);
+
+      // Provider starts "active", then the window expires mid-session.
+      var unlockedUntil = DateTime.now().add(const Duration(hours: 24));
+      service.setProStatusProvider(() =>
+          DateTime.now().isBefore(unlockedUntil));
+      final second = await service.createWidgetConfig(collectionId: col.id);
+      expect(second, isNotNull);
+
+      // Expire the window (as if 24h elapsed without a new ad).
+      unlockedUntil = DateTime.now().subtract(const Duration(seconds: 1));
+      await service.deleteWidgetConfig(second.id); // back to 1 widget
+      expect(
+        () => service.createWidgetConfig(collectionId: col.id),
+        throwsA(isA<WidgetLimitReachedException>()),
+        reason: 'Expired unlock must re-engage the 1-widget Free limit',
+      );
     });
 
     test('createWidgetConfig respects sizeCategory parameter', () async {

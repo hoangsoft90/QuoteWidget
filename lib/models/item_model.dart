@@ -7,12 +7,18 @@ class Item extends HiveObject {
   int order;
   final DateTime createdAt;
 
+  /// Soft-delete flag (Trash / Recently Deleted — Task 7).
+  bool isDeleted;
+  DateTime? deletedAt;
+
   Item({
     required this.id,
     required this.collectionId,
     required this.text,
     required this.order,
     required this.createdAt,
+    this.isDeleted = false,
+    this.deletedAt,
   });
 
   factory Item.create({
@@ -29,6 +35,8 @@ class Item extends HiveObject {
     );
   }
 
+  bool get isTrashed => isDeleted;
+
   static int _idCounter = 0;
   static String _generateId() {
     final ts = DateTime.now().microsecondsSinceEpoch.toRadixString(36);
@@ -43,6 +51,8 @@ class Item extends HiveObject {
       'text': text,
       'order': order,
       'createdAt': createdAt.toIso8601String(),
+      'isDeleted': isDeleted,
+      'deletedAt': deletedAt?.toIso8601String(),
     };
   }
 
@@ -53,6 +63,10 @@ class Item extends HiveObject {
       text: json['text'] as String,
       order: json['order'] as int,
       createdAt: DateTime.parse(json['createdAt'] as String),
+      isDeleted: json['isDeleted'] as bool? ?? false,
+      deletedAt: json['deletedAt'] != null
+          ? DateTime.tryParse(json['deletedAt'] as String)
+          : null,
     );
   }
 }
@@ -74,12 +88,14 @@ class ItemAdapter extends TypeAdapter<Item> {
       text: fields[2] as String,
       order: fields[3] as int,
       createdAt: fields[4] as DateTime,
+      isDeleted: fields[5] as bool? ?? false,
+      deletedAt: fields[6] as DateTime?,
     );
   }
 
   @override
   void write(BinaryWriter writer, Item obj) {
-    writer.writeByte(5); // number of fields
+    writer.writeByte(7); // number of fields
     writer.writeByte(0);
     writer.write(obj.id);
     writer.writeByte(1);
@@ -90,6 +106,10 @@ class ItemAdapter extends TypeAdapter<Item> {
     writer.write(obj.order);
     writer.writeByte(4);
     writer.write(obj.createdAt);
+    writer.writeByte(5);
+    writer.write(obj.isDeleted);
+    writer.writeByte(6);
+    writer.write(obj.deletedAt);
   }
 
   @override

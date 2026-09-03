@@ -1,11 +1,24 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/iap_service.dart';
+import '../services/rewarded_ad_service.dart';
+import '../services/storage_service.dart';
+import '../services/widget_service.dart';
+import 'recently_deleted_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   final IapService iapService;
+  final RewardedAdService rewardedAdService;
+  final StorageService storageService;
+  final WidgetService widgetService;
 
-  const SettingsScreen({super.key, required this.iapService});
+  const SettingsScreen({
+    super.key,
+    required this.iapService,
+    required this.rewardedAdService,
+    required this.storageService,
+    required this.widgetService,
+  });
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -13,6 +26,7 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   bool _isRestoring = false;
+  bool _isWatchingAd = false;
 
   Future<void> _restorePurchases() async {
     setState(() => _isRestoring = true);
@@ -39,10 +53,45 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  Future<void> _watchAdToUnlock() async {
+    if (_isWatchingAd) return;
+    setState(() => _isWatchingAd = true);
+    try {
+      final rewarded = await widget.rewardedAdService.showRewardedAd();
+      if (mounted) {
+        setState(() {}); // Refresh Pro status row
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(rewarded
+                ? 'Pro unlocked for 24 hours!'
+                : 'Ad not finished. Please try again.'),
+            backgroundColor: rewarded ? Colors.green : Colors.orange,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isWatchingAd = false);
+    }
+  }
+
+  Future<void> _buyForever() async {
+    final started = await widget.iapService.buyPro();
+    if (mounted) {
+      setState(() {});
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(started
+              ? 'Opening store… complete the purchase to remove ads forever.'
+              : 'Purchase unavailable right now.'),
+        ),
+      );
+    }
+  }
+
   Future<void> _openPrivacyPolicy() async {
-    // TODO: Replace with your hosted privacy policy URL
-    // e.g., GitHub Pages: https://<username>.github.io/quotewidget/privacy.html
-    final url = Uri.parse('https://github.com/quotewidget/privacy');
+    // Hosted on GitHub Pages of the QuoteWidget repo — static, versioned in git.
+    final url = Uri.parse(
+        'https://hoangsoft90.github.io/QuoteWidget/privacy.html');
     if (await canLaunchUrl(url)) {
       await launchUrl(url, mode: LaunchMode.externalApplication);
     }
@@ -50,10 +99,72 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isPro = widget.iapService.isPro;
+    final hoursLeft = widget.iapService.hoursRemaining;
+
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
       body: ListView(
         children: [
+          // Pro Status (time-bound model — Task 4)
+          ListTile(
+            leading: Icon(
+              isPro ? Icons.star : Icons.star_border,
+              color: isPro ? Colors.amber : null,
+            ),
+            title: Text(
+              isPro
+                  ? (widget.iapService.proUnlockedUntil!.year >= 9999
+                      ? 'Pro (Remove Ads Forever)'
+                      : 'Pro unlocked — ${hoursLeft}h left')
+                  : 'Free (1 Widget)',
+            ),
+            subtitle: Text(
+              isPro
+                  ? 'All features unlocked'
+                  : 'Watch a short ad to unlock Pro for 24h, or remove ads forever.',
+            ),
+            trailing: _isWatchingAd
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : null,
+            onTap: isPro ? null : _watchAdToUnlock,
+          ),
+
+          // Remove Ads Forever (secondary IAP path)
+          ListTile(
+            leading: const Icon(Icons.workspace_premium_outlined),
+            title: const Text('Remove Ads Forever'),
+            subtitle: const Text('One-time purchase — no ads, Pro forever'),
+            onTap: _buyForever,
+          ),
+
+          const Divider(),
+
+          // Recently Deleted (Trash — Task 7)
+          ListTile(
+            leading: const Icon(Icons.delete_outline),
+            title: const Text('Recently Deleted'),
+            subtitle: const Text('Restore or permanently delete trashed content'),
+            trailing: const Icon(Icons.chevron_right, size: 18),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => RecentlyDeletedScreen(
+                    storageService: widget.storageService,
+                    widgetService: widget.widgetService,
+                  ),
+                ),
+              );
+            },
+          ),
+
+          const Divider(),
+
           // Restore Purchases (required for Store review)
           ListTile(
             leading: const Icon(Icons.restore),
@@ -78,22 +189,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             subtitle: const Text('How we handle your data'),
             trailing: const Icon(Icons.open_in_new, size: 18),
             onTap: _openPrivacyPolicy,
-          ),
-
-          const Divider(),
-
-          // Pro Status
-          ListTile(
-            leading: Icon(
-              widget.iapService.isPro ? Icons.star : Icons.star_border,
-              color: widget.iapService.isPro ? Colors.amber : null,
-            ),
-            title: Text(widget.iapService.isPro ? 'Pro (Unlimited Widgets)' : 'Free (1 Widget)'),
-            subtitle: Text(
-              widget.iapService.isPro
-                  ? 'All features unlocked'
-                  : 'Upgrade to Pro for unlimited widgets, photo backgrounds, and more',
-            ),
           ),
 
           const Divider(),

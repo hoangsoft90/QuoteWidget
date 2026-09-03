@@ -14,6 +14,7 @@ class QuoteWidgetProvider : AppWidgetProvider() {
     companion object {
         private const val FREE_WIDGET_LIMIT = 1
         private const val KEY_IS_PRO = "is_pro"
+        private const val KEY_IS_PRO_EXPIRES_AT = "is_pro_expires_at"
         private const val KEY_CONFIGURED_WIDGETS = "configured_widget_ids"
 
         fun updateAllWidgets(context: Context) {
@@ -33,7 +34,10 @@ class QuoteWidgetProvider : AppWidgetProvider() {
         appWidgetManager: AppWidgetManager,
         appWidgetIds: IntArray
     ) {
-        val isPro = getBoolean(context, KEY_IS_PRO)
+        // Time-bound Pro: true only if is_pro AND not expired (epoch millis).
+        // A value of 0 or missing means either never unlocked (is_pro false)
+        // or permanent Pro (DateTime(9999) serialized) — both handled here.
+        val isPro = isProActive(context)
         val configuredIds = getConfiguredWidgetIds(context)
 
         for (appWidgetId in appWidgetIds) {
@@ -166,6 +170,7 @@ class QuoteWidgetProvider : AppWidgetProvider() {
         val showProgress = getBoolean(context, "${prefix}_showProgress", true)
         val currentIndex = getInt(context, "${prefix}_currentIndex", 0)
         val totalItems = getInt(context, "${prefix}_totalItems", 0)
+        val theme = getString(context, "${prefix}_theme", "light")
 
         val isRemoved = status == "removed"
 
@@ -204,8 +209,18 @@ class QuoteWidgetProvider : AppWidgetProvider() {
         // Set colors
         views.setTextColor(R.id.widget_text, displayTextColor)
 
-        // Set background
-        views.setInt(R.id.widget_text, "setBackgroundColor", backgroundColor)
+        // Curated themes render via a matching gradient drawable on the widget
+        // ROOT so the whole widget (both small & medium layouts) gets the
+        // theme. Light/Dark/Custom fall back to a solid background color.
+        val themeDrawableRes = themeDrawableFor(theme)
+        if (themeDrawableRes != null) {
+            views.setInt(R.id.widget_root, "setBackgroundResource", themeDrawableRes)
+            // Accent color drives the progress indicator for curated themes.
+            views.setTextColor(R.id.widget_progress, themeAccentFor(theme))
+        } else {
+            views.setInt(R.id.widget_root, "setBackgroundColor", backgroundColor)
+            views.setTextColor(R.id.widget_progress, 0xFF999999.toInt())
+        }
 
         // Set progress indicator
         if (showProgress && totalItems > 0 && collectionId != null &&
@@ -294,6 +309,46 @@ class QuoteWidgetProvider : AppWidgetProvider() {
         appWidgetManager.updateAppWidget(appWidgetId, views)
     }
 
+    /**
+     * Pro is active when is_pro is true AND (no expiry stored OR now < expiry).
+     * Expiry is epoch millis; Flutter writes DateTime(9999) for permanent Pro,
+     * which is far in the future, so permanent owners always pass the check.
+     */
+    private fun isProActive(context: Context): Boolean {
+        if (!getBoolean(context, KEY_IS_PRO, false)) return false
+        val expiresAt = getLong(context, KEY_IS_PRO_EXPIRES_AT, 0L)
+        if (expiresAt <= 0L) {
+            // No expiry on record — treat as active (legacy permanent owner).
+            return true
+        }
+        return System.currentTimeMillis() < expiresAt
+    }
+
+    /**
+     * Map a curated theme id (set in Flutter's WidgetConfig) to its gradient
+     * drawable. These ids MUST match lib/models/widget_theme.dart. Returns
+     * null for light/dark/custom, which use solid colors instead.
+     */
+    private fun themeDrawableFor(themeId: String): Int? = when (themeId) {
+        "ocean" -> R.drawable.widget_bg_ocean
+        "sunset" -> R.drawable.widget_bg_sunset
+        "forest" -> R.drawable.widget_bg_forest
+        "midnight" -> R.drawable.widget_bg_midnight
+        "rose" -> R.drawable.widget_bg_rose
+        "sand" -> R.drawable.widget_bg_sand
+        else -> null
+    }
+
+    private fun themeAccentFor(themeId: String): Int = when (themeId) {
+        "ocean" -> 0xFF80DEEA.toInt()
+        "sunset" -> 0xFFFFCC80.toInt()
+        "forest" -> 0xFFA5D6A7.toInt()
+        "midnight" -> 0xFF90CAF9.toInt()
+        "rose" -> 0xFFF48FB1.toInt()
+        "sand" -> 0xFFFFE0B2.toInt()
+        else -> 0xFF999999.toInt()
+    }
+
     private fun getConfiguredWidgetIds(context: Context): Set<Int> {
         val idsStr = getString(context, KEY_CONFIGURED_WIDGETS)
         if (idsStr.isEmpty()) return emptySet()
@@ -361,5 +416,17 @@ class QuoteWidgetProvider : AppWidgetProvider() {
         val flValue = flPrefs.getString("flutter.$key", null)
         if (flValue != null) return flValue.toBoolean()
         return flPrefs.getBoolean(key, default)
+    }
+
+    private fun getLong(context: Context, key: String, default: Long = 0L): Long {
+        // Widget data from home_widget: stored as String
+        val hwPrefs = getPrefs(context)
+        val hwValue = hwPrefs.getString(key, null)
+        if (hwValue != null) return hwValue.toLongOrNull() ?: default
+        // Supplementary data from Flutter SharedPreferences
+        val flPrefs = getFlutterPrefs(context)
+        val flValue = flPrefs.getString("flutter.$key", null)
+        if (flValue != null) return flValue.toLongOrNull() ?: default
+        return flPrefs.getLong(key, default)
     }
 }

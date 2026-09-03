@@ -4,38 +4,44 @@ import android.app.Activity
 import android.content.Intent
 import android.os.Bundle
 
+/**
+ * Receives ACTION_SEND text shares from other apps.
+ *
+ * Behaviour (Task 2 — P0): the share is stored and the activity finishes
+ * WITHOUT launching the Flutter UI, so the user is never yanked out of the
+ * app they were sharing from (no screen flash). The text is picked up the
+ * next time the user opens "Your Words" via _handlePendingShare() in main.dart.
+ *
+ * Storage: MUST write into the same SharedPreferences file the Flutter
+ * shared_preferences plugin reads — file "FlutterSharedPreferences", keys
+ * prefixed "flutter." (e.g. key "flutter.pending_share_text"). Writing to a
+ * different file/key means Flutter never sees the share (verified mismatch in
+ * the pre-Task-2 code, which used a "share_prefs" file with unprefixed keys).
+ */
 class ShareReceiverActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
         handleShareIntent(intent)
-
-        // Finish this activity and launch main activity
-        val mainIntent = Intent(this, MainActivity::class.java).apply {
-            action = Intent.ACTION_SEND
-            type = "text/plain"
-            putExtra(Intent.EXTRA_TEXT, intent.getStringExtra(Intent.EXTRA_TEXT))
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-        }
-        startActivity(mainIntent)
+        // No startActivity() — never open the app UI from a share.
         finish()
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         handleShareIntent(intent)
+        finish()
     }
 
     private fun handleShareIntent(intent: Intent?) {
         if (intent?.action == Intent.ACTION_SEND && intent.type == "text/plain") {
             val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)
             if (!sharedText.isNullOrEmpty()) {
-                // Store shared text for Flutter to pick up
-                val prefs = getSharedPreferences("share_prefs", MODE_PRIVATE)
+                // Write to the file the Flutter shared_preferences plugin uses.
+                val prefs = getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE)
                 prefs.edit()
-                    .putString("pending_share_text", sharedText)
-                    .putLong("share_timestamp", System.currentTimeMillis())
+                    .putString("flutter.pending_share_text", sharedText)
+                    .putLong("flutter.share_timestamp", System.currentTimeMillis())
                     .commit()  // synchronous — ensures data survives if app is killed immediately
             }
         }

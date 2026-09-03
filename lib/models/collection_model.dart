@@ -5,10 +5,16 @@ class Collection extends HiveObject {
   String name;
   final DateTime createdAt;
 
+  /// Soft-delete flag (Trash / Recently Deleted — Task 7).
+  bool isDeleted;
+  DateTime? deletedAt;
+
   Collection({
     required this.id,
     required this.name,
     required this.createdAt,
+    this.isDeleted = false,
+    this.deletedAt,
   });
 
   factory Collection.create({required String name}) {
@@ -18,6 +24,8 @@ class Collection extends HiveObject {
       createdAt: DateTime.now(),
     );
   }
+
+  bool get isTrashed => isDeleted;
 
   static int _idCounter = 0;
   static String _generateId() {
@@ -31,6 +39,8 @@ class Collection extends HiveObject {
       'id': id,
       'name': name,
       'createdAt': createdAt.toIso8601String(),
+      'isDeleted': isDeleted,
+      'deletedAt': deletedAt?.toIso8601String(),
     };
   }
 
@@ -39,6 +49,10 @@ class Collection extends HiveObject {
       id: json['id'] as String,
       name: json['name'] as String,
       createdAt: DateTime.parse(json['createdAt'] as String),
+      isDeleted: json['isDeleted'] as bool? ?? false,
+      deletedAt: json['deletedAt'] != null
+          ? DateTime.tryParse(json['deletedAt'] as String)
+          : null,
     );
   }
 }
@@ -58,18 +72,24 @@ class CollectionAdapter extends TypeAdapter<Collection> {
       id: fields[0] as String,
       name: fields[1] as String,
       createdAt: fields[2] as DateTime,
+      isDeleted: fields[3] as bool? ?? false,
+      deletedAt: fields[4] as DateTime?,
     );
   }
 
   @override
   void write(BinaryWriter writer, Collection obj) {
-    writer.writeByte(3); // number of fields
+    writer.writeByte(5); // number of fields
     writer.writeByte(0);
     writer.write(obj.id);
     writer.writeByte(1);
     writer.write(obj.name);
     writer.writeByte(2);
     writer.write(obj.createdAt);
+    writer.writeByte(3);
+    writer.write(obj.isDeleted);
+    writer.writeByte(4);
+    writer.write(obj.deletedAt);
   }
 
   @override

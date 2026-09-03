@@ -1,9 +1,16 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- No INTERNET permission - app is offline-only -->
+    <!-- INTERNET + network state required by google_mobile_ads (rewarded ads). -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <application
         android:label="Your Words"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
+        <!-- AdMob App ID. TODO: replace with the real AdMob App ID before
+             store submission (currently Google's official test App ID). -->
+        <meta-data
+            android:name="com.google.android.gms.ads.APPLICATION_ID"
+            android:value="ca-app-pub-3940256099942544~3347511713" />
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -23,12 +30,16 @@
             </intent-filter>
         </activity>
 
-        <!-- Share Handler - receive shared text from other apps -->
+        <!-- Share Handler - receive shared text from other apps.
+             Translucent theme: no white flash while the activity saves the
+             share and finishes WITHOUT launching the app UI (Task 2). -->
         <activity
             android:name="com.quotewidget.quotewidget.ShareReceiverActivity"
             android:exported="true"
             android:launchMode="singleTop"
-            android:theme="@style/LaunchTheme">
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />

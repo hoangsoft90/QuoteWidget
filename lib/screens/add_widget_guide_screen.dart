@@ -2,18 +2,21 @@ import 'package:flutter/material.dart';
 import '../services/widget_service.dart';
 import '../services/storage_service.dart';
 import '../services/iap_service.dart';
+import '../services/rewarded_ad_service.dart';
 import 'home_screen.dart';
 
 class AddWidgetGuideScreen extends StatefulWidget {
   final WidgetService widgetService;
   final StorageService storageService;
   final IapService iapService;
+  final RewardedAdService rewardedAdService;
 
   const AddWidgetGuideScreen({
     super.key,
     required this.widgetService,
     required this.storageService,
     required this.iapService,
+    required this.rewardedAdService,
   });
 
   @override
@@ -73,6 +76,7 @@ class _AddWidgetGuideScreenState extends State<AddWidgetGuideScreen> {
           storageService: widget.storageService,
           widgetService: widget.widgetService,
           iapService: widget.iapService,
+          rewardedAdService: widget.rewardedAdService,
         ),
       ),
     );

@@ -13,6 +13,7 @@ class StorageService {
   late Box<Item> _itemsBox;
   late Box<WidgetConfig> _widgetConfigsBox;
   SnapshotManager? _snapshotManager;
+  bool Function()? _isProProvider;
   bool _isPro = false;
   static bool _adaptersRegistered = false;
 
@@ -22,11 +23,22 @@ class StorageService {
     _snapshotManager = manager;
   }
 
-  /// Set Pro status for widget limit enforcement.
+  /// Set a live Pro-status provider for widget limit enforcement.
+  /// The provider is re-evaluated on every check, so when a 24h unlock
+  /// expires the limit re-engages automatically without restart.
+  void setProStatusProvider(bool Function() isProProvider) {
+    _isProProvider = isProProvider;
+  }
+
+  /// Set Pro status for widget limit enforcement (static fallback).
   /// Called once at startup after IapService initializes.
   void setProStatus(bool isPro) {
     _isPro = isPro;
   }
+
+  /// Current Pro status — prefers the live provider, falls back to the
+  /// static value (used in tests / when no provider is injected).
+  bool get _isProActive => _isProProvider?.call() ?? _isPro;
 
   // Initialize Hive and open boxes.
   // If [testPath] is provided, use Hive.init() instead of initFlutter() (for unit tests).
@@ -68,25 +80,34 @@ class StorageService {
     return collection;
   }
 
+  /// Active (non-trashed) collections, newest first.
   List<Collection> getAllCollections() {
-    return _collectionsBox.values.toList()
+    return _collectionsBox.values
+        .where((c) => !c.isDeleted)
+        .toList()
       ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
   }
 
   Collection? getCollection(String id) {
-    return _collectionsBox.get(id);
+    final collection = _collectionsBox.get(id);
+    if (collection == null || collection.isDeleted) return null;
+    return collection;
   }
 
   Future<void> updateCollection(String id, String name) async {
     final collection = _collectionsBox.get(id);
-    if (collection != null) {
+    if (collection != null && !collection.isDeleted) {
       collection.name = name;
       await collection.save();
     }
   }
 
+  /// Soft-delete a collection (Trash): flag collection + its items; widget
+  /// configs tied to it are removed (the widget shows "Collection removed"
+  /// until reconfigured). Data stays in Hive for restore / 30-day purge.
   Future<void> deleteCollection(String id) async {
-    // Safety snapshot before destructive operation (plan §2)
+    // Safety snapshot before destructive operation (plan §2) — captured while
+    // the collection is still active so it can be restored from the snapshot.
     if (_snapshotManager != null) {
       await _snapshotManager!.createSnapshot(
         collections: getAllCollections(),
@@ -95,29 +116,100 @@ class StorageService {
       );
     }
 
-    // Cascade delete: delete all items in this collection
+    final now = DateTime.now();
+    final collection = _collectionsBox.get(id);
+    if (collection == null) return;
+
+    // Flag the collection itself.
+    collection.isDeleted = true;
+    collection.deletedAt = now;
+    await collection.save();
+
+    // Flag all its items so restore can bring the whole set back.
     final items = _itemsBox.values
-        .where((item) => item.collectionId == id)
+        .where((item) => item.collectionId == id && !item.isDeleted)
         .toList();
     for (final item in items) {
-      await item.delete();
+      item.isDeleted = true;
+      item.deletedAt = now;
+      await item.save();
     }
 
-    // Cascade delete: delete all widget configs for this collection
+    // Remove widget configs pointing at this collection (no orphan widgets).
     final widgetConfigs = _widgetConfigsBox.values
         .where((config) => config.collectionId == id)
         .toList();
     for (final config in widgetConfigs) {
       await config.delete();
     }
+  }
 
-    // Delete the collection itself
+  /// Restore a trashed collection + its trashed items.
+  Future<void> restoreCollection(String id) async {
+    final collection = _collectionsBox.get(id);
+    if (collection == null || !collection.isDeleted) return;
+    collection.isDeleted = false;
+    collection.deletedAt = null;
+    await collection.save();
+
+    final items = _itemsBox.values
+        .where((item) => item.collectionId == id && item.isDeleted)
+        .toList();
+    for (final item in items) {
+      item.isDeleted = false;
+      item.deletedAt = null;
+      await item.save();
+    }
+  }
+
+  /// Permanently delete a trashed collection + its remaining items.
+  Future<void> permanentlyDeleteCollection(String id) async {
+    final items = _itemsBox.values
+        .where((item) => item.collectionId == id)
+        .toList();
+    for (final item in items) {
+      await item.delete();
+    }
     await _collectionsBox.delete(id);
+  }
+
+  /// Trashed collections (Recently Deleted screen).
+  List<Collection> getTrashedCollections() {
+    return _collectionsBox.values.where((c) => c.isDeleted).toList()
+      ..sort((a, b) => (b.deletedAt ?? b.createdAt)
+          .compareTo(a.deletedAt ?? a.createdAt));
+  }
+
+  /// Trashed items (Recently Deleted screen).
+  List<Item> getTrashedItems() {
+    return _itemsBox.values.where((i) => i.isDeleted).toList()
+      ..sort((a, b) => (b.deletedAt ?? b.createdAt)
+          .compareTo(a.deletedAt ?? a.createdAt));
+  }
+
+  /// Purge items/collections trashed more than [retention] ago.
+  /// Called at app start; defaults to 30 days (Task 7).
+  Future<void> purgeTrash({Duration retention = const Duration(days: 30)}) async {
+    final cutoff = DateTime.now().subtract(retention);
+
+    final expiredCollections = _collectionsBox.values
+        .where((c) => c.isDeleted && (c.deletedAt ?? c.createdAt).isBefore(cutoff))
+        .toList();
+    for (final collection in expiredCollections) {
+      await permanentlyDeleteCollection(collection.id);
+    }
+
+    final expiredItems = _itemsBox.values
+        .where((i) => i.isDeleted && (i.deletedAt ?? i.createdAt).isBefore(cutoff))
+        .toList();
+    for (final item in expiredItems) {
+      await item.delete();
+    }
   }
 
   int getItemCountForCollection(String collectionId) {
     return _itemsBox.values
-        .where((item) => item.collectionId == collectionId)
+        .where((item) => item.collectionId == collectionId && !item.isDeleted)
         .length;
   }
 
@@ -137,30 +229,53 @@ class StorageService {
     return item;
   }
 
+  /// Active (non-trashed) items of a collection, by order.
   List<Item> getItemsForCollection(String collectionId) {
     return _itemsBox.values
-        .where((item) => item.collectionId == collectionId)
+        .where((item) => item.collectionId == collectionId && !item.isDeleted)
         .toList()
       ..sort((a, b) => a.order.compareTo(b.order));
   }
 
+  /// Active (non-trashed) items across all collections.
   List<Item> getAllItems() {
-    return _itemsBox.values.toList();
+    return _itemsBox.values.where((item) => !item.isDeleted).toList();
   }
 
   Item? getItem(String id) {
-    return _itemsBox.get(id);
+    final item = _itemsBox.get(id);
+    if (item == null || item.isDeleted) return null;
+    return item;
   }
 
   Future<void> updateItem(String id, String text) async {
     final item = _itemsBox.get(id);
-    if (item != null) {
+    if (item != null && !item.isDeleted) {
       item.text = text;
       await item.save();
     }
   }
 
+  /// Soft-delete an item (Trash). Data stays in Hive for restore / purge.
   Future<void> deleteItem(String id) async {
+    final item = _itemsBox.get(id);
+    if (item == null || item.isDeleted) return;
+    item.isDeleted = true;
+    item.deletedAt = DateTime.now();
+    await item.save();
+  }
+
+  /// Restore a single trashed item.
+  Future<void> restoreItem(String id) async {
+    final item = _itemsBox.get(id);
+    if (item == null || !item.isDeleted) return;
+    item.isDeleted = false;
+    item.deletedAt = null;
+    await item.save();
+  }
+
+  /// Permanently delete a single trashed item.
+  Future<void> permanentlyDeleteItem(String id) async {
     await _itemsBox.delete(id);
   }
 
@@ -205,7 +320,7 @@ class StorageService {
     SizeCategory sizeCategory = SizeCategory.small,
   }) async {
     // Free tier: max 1 widget. Pro: unlimited.
-    if (!_isPro && _widgetConfigsBox.isNotEmpty) {
+    if (!_isProActive && _widgetConfigsBox.isNotEmpty) {
       throw WidgetLimitReachedException();
     }
 

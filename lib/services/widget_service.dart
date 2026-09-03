@@ -85,9 +85,13 @@ class WidgetService {
     }
   }
 
-  /// Sync Pro status to SharedPreferences so Kotlin can read it.
-  Future<void> syncProStatus(bool isPro) async {
+  /// Sync Pro status + expiry to SharedPreferences so Kotlin can read it.
+  /// [proUnlockedUntil] null = not unlocked; DateTime(9999) = permanent.
+  Future<void> syncProStatus(bool isPro, {DateTime? proUnlockedUntil}) async {
     await HomeWidget.saveWidgetData('is_pro', isPro.toString());
+    final millis = proUnlockedUntil?.millisecondsSinceEpoch ?? 0;
+    await HomeWidget.saveWidgetData('is_pro_expires_at', millis.toString());
+    await WidgetDataBridge.setProExpiry(proUnlockedUntil);
   }
 
   /// Get device manufacturer for OEM-specific guides

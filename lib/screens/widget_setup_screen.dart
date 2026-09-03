@@ -1,20 +1,29 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/collection_model.dart';
+import '../models/widget_config_model.dart';
 import '../services/storage_service.dart';
 import '../services/widget_service.dart';
 import '../services/widget_data_bridge.dart';
+import '../services/iap_service.dart';
+import '../services/rewarded_ad_service.dart';
 import 'collection_detail_screen.dart';
 import 'package:home_widget/home_widget.dart';
 
 /// Screen shown when user taps an unconfigured/empty widget on Home Screen.
 /// If [collectionId] is null → shows collection picker (first-time setup).
 /// If [collectionId] is provided → opens collection detail to add items.
+///
+/// This is the in-app widget-limit block point: a Free user trying to add a
+/// 2nd widget hits [WidgetLimitReachedException] here and sees a rewarded-ad
+/// unlock dialog instead of a dead-end (Task 1 acceptance).
 class WidgetSetupScreen extends StatefulWidget {
   final int appWidgetId;
   final String? collectionId;
   final StorageService storageService;
   final WidgetService widgetService;
+  final IapService iapService;
+  final RewardedAdService rewardedAdService;
 
   const WidgetSetupScreen({
     super.key,
@@ -22,6 +31,8 @@ class WidgetSetupScreen extends StatefulWidget {
     this.collectionId,
     required this.storageService,
     required this.widgetService,
+    required this.iapService,
+    required this.rewardedAdService,
   });
 
   @override
@@ -55,10 +66,17 @@ class _WidgetSetupScreenState extends State<WidgetSetupScreen> {
     if (_selectedCollection == null || _saving) return;
     setState(() => _saving = true);
 
-    // Create WidgetConfig
-    final config = await widget.storageService.createWidgetConfig(
-      collectionId: _selectedCollection!.id,
-    );
+    // Create WidgetConfig (throws WidgetLimitReachedException for Free 2nd)
+    WidgetConfig config;
+    try {
+      config = await widget.storageService.createWidgetConfig(
+        collectionId: _selectedCollection!.id,
+      );
+    } on WidgetLimitReachedException {
+      if (mounted) setState(() => _saving = false);
+      await _showUnlockDialog();
+      return;
+    }
 
     // Register mapping
     await WidgetDataBridge.registerWidgetMapping(
@@ -101,10 +119,17 @@ class _WidgetSetupScreenState extends State<WidgetSetupScreen> {
     if (_selectedCollection == null || _saving) return;
     setState(() => _saving = true);
 
-    // Create WidgetConfig
-    final config = await widget.storageService.createWidgetConfig(
-      collectionId: _selectedCollection!.id,
-    );
+    // Create WidgetConfig (throws WidgetLimitReachedException for Free 2nd)
+    WidgetConfig config;
+    try {
+      config = await widget.storageService.createWidgetConfig(
+        collectionId: _selectedCollection!.id,
+      );
+    } on WidgetLimitReachedException {
+      if (mounted) setState(() => _saving = false);
+      await _showUnlockDialog();
+      return;
+    }
 
     // Register mapping: appWidgetId ↔ configId
     await WidgetDataBridge.registerWidgetMapping(
@@ -133,6 +158,63 @@ class _WidgetSetupScreenState extends State<WidgetSetupScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Widget configured!')),
       );
+    }
+  }
+
+  /// Show the rewarded-ad unlock dialog when the Free widget limit blocks
+  /// a 2nd widget. On successful reward, retries the save.
+  Future<void> _showUnlockDialog() async {
+    if (!mounted) return;
+    final unlocked = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Text('Widget Limit Reached'),
+        content: const Text(
+          'Free tier includes 1 widget. Watch a short ad to unlock Pro for 24h '
+          'and add more widgets — or buy Remove Ads Forever to keep Pro '
+          'permanently.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop('buy'),
+            child: const Text('Remove Ads Forever'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop('ad'),
+            child: const Text('Watch Ad — Unlock 24h'),
+          ),
+        ],
+      ),
+    );
+
+    if (unlocked == 'ad') {
+      final rewarded = await widget.rewardedAdService.showRewardedAd();
+      if (rewarded && widget.iapService.isPro) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Pro unlocked for 24h! Now add your widget.')),
+          );
+        }
+        await _save();
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Ad not finished. Please try again.')),
+          );
+        }
+      }
+    } else if (unlocked == 'buy') {
+      final started = await widget.iapService.buyPro();
+      if (!started && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Purchase unavailable right now.')),
+        );
+      }
     }
   }
 

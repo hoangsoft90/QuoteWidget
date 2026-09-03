@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/widget_config_model.dart';
 import '../models/collection_model.dart';
+import '../models/widget_theme.dart';
 import '../services/storage_service.dart';
 
 class WidgetPreview extends StatefulWidget {
@@ -40,10 +41,30 @@ class _WidgetPreviewState extends State<WidgetPreview> {
         ? const Size(110, 110)
         : const Size(250, 110);
 
-    return Container(
-      width: size.width,
-      height: size.height,
-      decoration: BoxDecoration(
+    // Curated theme → mirror the native gradient drawable in the preview.
+    final curated = curatedThemeById(widget.config.appearance.theme);
+    final BoxDecoration decoration;
+    if (curated != null) {
+      decoration = BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Color(curated.backgroundColor),
+            Color(curated.gradientEnd),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.1),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      );
+    } else {
+      decoration = BoxDecoration(
         color: Color(widget.config.appearance.background),
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
@@ -53,7 +74,13 @@ class _WidgetPreviewState extends State<WidgetPreview> {
             offset: const Offset(0, 2),
           ),
         ],
-      ),
+      );
+    }
+
+    return Container(
+      width: size.width,
+      height: size.height,
+      decoration: decoration,
       padding: const EdgeInsets.all(12),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
