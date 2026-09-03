@@ -1,8 +1,11 @@
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:quotewidget/services/iap_service.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
   });
@@ -79,6 +82,41 @@ void main() {
       expect(iap.isPro, true, reason: 'Permanent owner is always Pro');
       // hoursRemaining clamps to a sane bound rather than showing ~8.7M h.
       expect(iap.hoursRemaining, 24 * 365);
+    });
+  });
+
+  group('Widget push on Pro change (plan3 Fix B)', () {
+    test('unlockProFor24h pushes a widget update AFTER the is_pro writes',
+        () async {
+      const channel = MethodChannel('home_widget');
+      final calls = <MethodCall>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+        calls.add(call);
+        return null;
+      });
+      addTearDown(() => TestDefaultBinaryMessengerBinding.instance
+          .defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null));
+
+      final iap = IapService();
+      await iap.unlockProFor24h();
+
+      final methods = calls.map((c) => c.method).toList();
+      final saveIdx = <int>[];
+      for (var i = 0; i < calls.length; i++) {
+        if (calls[i].method == 'saveWidgetData' &&
+            (calls[i].arguments as Map)['id'] == 'is_pro') {
+          saveIdx.add(i);
+        }
+      }
+      expect(saveIdx, isNotEmpty,
+          reason: 'is_pro must be written to HomeWidgetPreferences');
+      expect(methods, contains('updateWidget'),
+          reason: 'unlock must push a widget update (plan3 Fix B)');
+      expect(methods.indexOf('updateWidget'), greaterThan(saveIdx.first),
+          reason: 'updateWidget must run after the is_pro write so Kotlin '
+              're-reads the fresh value');
     });
   });
 }

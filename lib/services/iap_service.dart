@@ -116,18 +116,32 @@ class IapService {
   }
 
   /// Handle purchase stream updates.
-  void _onPurchaseUpdate(List<PurchaseDetails> purchases) {
+  ///
+  /// Async-safe (plan3 Fix C): the permanent grant is persisted BEFORE the
+  /// pending purchase is completed, so a crash between grant and completion
+  /// cannot lose Pro for a paid purchase. Persistence/completion errors are
+  /// tolerated — memory state is already granted and the store can restore.
+  Future<void> _onPurchaseUpdate(List<PurchaseDetails> purchases) async {
     for (final purchase in purchases) {
       if (purchase.productID == proProductId) {
         if (purchase.status == PurchaseStatus.purchased ||
             purchase.status == PurchaseStatus.restored) {
           // Permanent purchase → never expires.
           proUnlockedUntil = DateTime(9999);
-          _persist();
+          try {
+            await _persist();
+          } catch (_) {
+            // Non-fatal: memory Pro already granted; store can restore later.
+          }
         }
-        // Complete pending purchases (required by store guidelines)
+        // Complete pending purchases (required by store guidelines) — after
+        // the grant persisted, so a finished purchase always leaves Pro on.
         if (purchase.pendingCompletePurchase) {
-          _iapInstance.completePurchase(purchase);
+          try {
+            await _iapInstance.completePurchase(purchase);
+          } catch (_) {
+            // Non-fatal: store retries / user can restore.
+          }
         }
       }
     }
@@ -142,12 +156,20 @@ class IapService {
     // Also write to FlutterSharedPreferences via the bridge file convention
     await prefs.setString('is_pro', isPro.toString());
     await prefs.setString('is_pro_expires_at', expiryMillis.toString());
-    // Sync to widget SharedPreferences so Kotlin can read is_pro + expiry.
+    // Sync to widget SharedPreferences so Kotlin can read is_pro + expiry,
+    // then push an update so Kotlin re-renders (a 2nd-widget "Upgrade to
+    // Pro" placeholder becomes a tappable set-up prompt once Pro is active).
     // Best-effort: widget sync must never break purchase persistence.
     try {
       await HomeWidget.saveWidgetData('is_pro', isPro.toString());
       await HomeWidget.saveWidgetData(
           'is_pro_expires_at', expiryMillis.toString());
+      // plan3 Fix B: without this push, unlocking from Settings leaves an
+      // existing native placeholder stale until some unrelated update.
+      await HomeWidget.updateWidget(
+        name: 'QuoteWidgetProvider',
+        androidName: 'QuoteWidgetProvider',
+      );
     } catch (_) {
       // No widget host (e.g. unit test) — ignore.
     }

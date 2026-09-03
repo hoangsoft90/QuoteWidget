@@ -239,10 +239,23 @@ class _WidgetSetupScreenState extends State<WidgetSetupScreen> {
       }
     } else if (unlocked == 'buy') {
       final started = await widget.iapService.buyPro();
-      if (!started && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Purchase unavailable right now.')),
-        );
+      if (mounted) {
+        if (widget.iapService.isPro) {
+          // Grant already applied via the purchase stream → retry the setup
+          // right away, exactly like the rewarded-ad path (plan3 Fix C).
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Pro unlocked forever! Now add your widget.'),
+            ),
+          );
+          await _save();
+        } else if (!started) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Purchase unavailable right now.')),
+          );
+        }
+        // started && !isPro: the store sheet closed before the grant event
+        // landed — Pro activates momentarily; user taps "Set Up Widget" again.
       }
     }
   }
