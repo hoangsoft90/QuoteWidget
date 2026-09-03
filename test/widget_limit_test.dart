@@ -26,7 +26,7 @@ void main() {
       final isPro = await WidgetDataBridge.getProStatus();
 
       // Kotlin logic: !isPro && configured.size >= 1 → block
-      final shouldBlock = !isPro && configured.length >= 1;
+      final shouldBlock = !isPro && configured.isNotEmpty;
       expect(shouldBlock, false, reason: 'First widget should not be blocked');
     });
 
@@ -43,7 +43,7 @@ void main() {
       final isPro = await WidgetDataBridge.getProStatus();
 
       // Kotlin logic: !isPro && configured.size >= 1 → block
-      final shouldBlock = !isPro && configured.length >= 1;
+      final shouldBlock = !isPro && configured.isNotEmpty;
       expect(shouldBlock, true, reason: 'Second widget should be blocked on Free tier');
       expect(configured.length, 1, reason: 'One widget already configured');
     });
@@ -63,7 +63,7 @@ void main() {
       final isPro = await WidgetDataBridge.getProStatus();
 
       // Kotlin logic: isPro → never block
-      final shouldBlock = !isPro && configured.length >= 1;
+      final shouldBlock = !isPro && configured.isNotEmpty;
       expect(shouldBlock, false, reason: 'Pro user should never be blocked');
       expect(configured.length, 3, reason: 'All 3 widgets configured');
     });
@@ -80,7 +80,7 @@ void main() {
       // Check: blocked before upgrade
       var configured = await WidgetDataBridge.getConfiguredWidgetIds();
       var isPro = await WidgetDataBridge.getProStatus();
-      expect(!isPro && configured.length >= 1, true, reason: 'Blocked before upgrade');
+      expect(!isPro && configured.isNotEmpty, true, reason: 'Blocked before upgrade');
 
       // Upgrade to Pro
       await WidgetDataBridge.setProStatus(true);
@@ -88,7 +88,7 @@ void main() {
       // Check: unblocked after upgrade
       configured = await WidgetDataBridge.getConfiguredWidgetIds();
       isPro = await WidgetDataBridge.getProStatus();
-      expect(!isPro && configured.length >= 1, false, reason: 'Unblocked after Pro upgrade');
+      expect(!isPro && configured.isNotEmpty, false, reason: 'Unblocked after Pro upgrade');
     });
   });
 
@@ -201,7 +201,7 @@ void main() {
       // → Widget 1002 is new, not configured
       // → Free tier, already has 1 configured → BLOCK
       final isPro = await WidgetDataBridge.getProStatus();
-      final shouldBlock = !isPro && configured.length >= 1;
+      final shouldBlock = !isPro && configured.isNotEmpty;
       expect(shouldBlock, true, reason: 'Second widget blocked on Free tier');
 
       // Step 4: Kotlin shows "Upgrade to Pro" on widget 1002
@@ -211,7 +211,7 @@ void main() {
       await WidgetDataBridge.setProStatus(true);
 
       // Step 6: Widget 1002 should now be accessible
-      final shouldBlockAfterUpgrade = !await WidgetDataBridge.getProStatus() && configured.length >= 1;
+      final shouldBlockAfterUpgrade = !await WidgetDataBridge.getProStatus() && configured.isNotEmpty;
       expect(shouldBlockAfterUpgrade, false, reason: 'After Pro upgrade, widget 1002 accessible');
     });
   });

@@ -276,11 +276,9 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
     return ReorderableListView.builder(
       padding: const EdgeInsets.all(8),
       itemCount: _items.length,
-      onReorder: (int fromIndex, int toIndex) {
-        if (fromIndex < toIndex) {
-          toIndex -= 1;
-        }
-
+      onReorderItem: (int fromIndex, int toIndex) {
+        // onReorderItem already adjusts newIndex for the removed item — no
+        // manual correction needed (unlike the deprecated onReorder).
         final item = _items.removeAt(fromIndex);
         _items.insert(toIndex, item);
 
