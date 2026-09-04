@@ -4,6 +4,7 @@
 - [x] `isExpiredLocked(context, appWidgetId)`: `!isProActive && configured count > FREE_WIDGET_LIMIT && widget is configured && widget != oldest id` — QuoteWidgetProvider.kt `isExpiredLocked()`
 - [x] `updateAppWidget()` renders "24h Pass Expired\nTap to renew" (route=paywall) for locked widgets instead of content — QuoteWidgetProvider.kt updateAppWidget() top guard
 - [x] Refactor `showUpgradePrompt()` → shared `showLockedPrompt(message)`; onUpdate keeps its "Upgrade to Pro" text — QuoteWidgetProvider.kt
+- [x] Startup re-render push: `syncProStatus` calls `HomeWidget.updateWidget` after writing is_pro (updatePeriodMillis=0 → no system refresh; lock must self-apply at next app open) — widget_service.dart + 2 channel-mock tests
 
 ## §1.7 — Quick Share Undo (Flutter)
 - [x] `ShareService.saveToCollection` returns created `Item?` (null on failure) — share_service.dart
@@ -16,6 +17,6 @@
 
 ## Verify
 - [x] `flutter analyze` exit 0 — "No issues found!"
-- [x] `flutter test` all pass — **91/91** (84 baseline + 4 share_service + 3 quick_share_undo)
+- [x] `flutter test` all pass — **93/93** (84 baseline + 4 share_service + 3 quick_share_undo + 2 widget_service)
 - [x] Commit + push → CI debug + release green — run **33857086225** (commit `7eed09c`) completed success
 - [ ] Device-test checklist (§1.8) — **manual gate, cannot run in this env**

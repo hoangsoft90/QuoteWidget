@@ -87,11 +87,26 @@ class WidgetService {
 
   /// Sync Pro status + expiry to SharedPreferences so Kotlin can read it.
   /// [proUnlockedUntil] null = not unlocked; DateTime(9999) = permanent.
+  ///
+  /// Called once at app startup with the freshly-loaded status. Also pushes a
+  /// widget update so Kotlin re-renders — plan5 Sprint 0 §1.6: without this, a
+  /// widget whose 24h pass expired while the app was closed would keep showing
+  /// stale content forever (updatePeriodMillis=0 → no system refresh; the
+  /// lock only applies on a render). The push makes expiry self-apply at next
+  /// app open. Best-effort: never break app startup on a missing widget host.
   Future<void> syncProStatus(bool isPro, {DateTime? proUnlockedUntil}) async {
     await HomeWidget.saveWidgetData('is_pro', isPro.toString());
     final millis = proUnlockedUntil?.millisecondsSinceEpoch ?? 0;
     await HomeWidget.saveWidgetData('is_pro_expires_at', millis.toString());
     await WidgetDataBridge.setProExpiry(proUnlockedUntil);
+    try {
+      await HomeWidget.updateWidget(
+        name: 'QuoteWidgetProvider',
+        androidName: 'QuoteWidgetProvider',
+      );
+    } catch (_) {
+      // No widget host (unit tests / non-Android) — ignore.
+    }
   }
 
   /// Get device manufacturer for OEM-specific guides

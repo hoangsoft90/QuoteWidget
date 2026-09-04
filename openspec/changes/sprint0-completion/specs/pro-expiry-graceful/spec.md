@@ -22,6 +22,10 @@ changed, app-initiated update, tap), it shows the state below:
   new channels.
 - Tap-to-cycle (`WIDGET_TAP`) is unreachable on a locked widget because its click
   intent is the paywall activity, not the tap broadcast.
+- `updatePeriodMillis=0` → no system periodic refresh, so expiry while the app is
+  closed would otherwise leave stale content rendering forever. `WidgetService.syncProStatus`
+  (called once at startup with the freshly-loaded status) pushes a `HomeWidget.updateWidget`
+  AFTER writing `is_pro`/`is_pro_expires_at`, so the lock self-applies at next app open.
 
 ## Keys / files
 

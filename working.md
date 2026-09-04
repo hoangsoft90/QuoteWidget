@@ -71,7 +71,11 @@
   testWidgets/FakeAsync). Fix kèm: `showDialog` multi-collection dùng navigator-key
   context (trước dùng app-level context ở TRÊN MaterialApp → crash tiềm ẩn khi
   user >1 collection share).
-- Tests: 84 → **91** (4 share_service_test + 3 quick_share_undo_test). analyze exit 0.
+- Tests: 84 → **93** (4 share_service_test + 3 quick_share_undo_test + 2 widget_service_test
+  startup-push). analyze exit 0. (Review bổ sung: `syncProStatus` giờ push
+  `HomeWidget.updateWidget` sau khi ghi is_pro — `updatePeriodMillis=0` nên không có
+  system refresh; nếu không push, widget hết hạn khi app đóng sẽ render content cũ
+  mãi tới khi tap/reboot. Push lúc app mở → lock tự áp dụng.)
 - Openspec: `openspec/changes/sprint0-completion/`.
 - CI run **33857086225** (commit `7eed09c`) green — analyze + tests + debug/release APK
   (Kotlin §1.6 compile gate). Device test §1.8 = manual gate → Sprint 1/2/3 (plan5 §2–§4) chưa mở.
