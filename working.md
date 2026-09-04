@@ -2,9 +2,9 @@
 
 ## Current Status
 
-**Phase:** plan4_final Sprint A (Stability) code-complete — 85/85 tests pass
-**Next:** CI verify (push mới nhất) → **device test Sprint A §2.6** (bắt buộc, gated trước Sprint B)
-**Blocker:** Device test cần máy thật (không chạy được trong env này) — Sprint B/C/D chờ
+**Phase:** plan5_final Sprint 0 code-complete — 91/91 tests pass
+**Next:** CI verify (push mới nhất) → **device test Sprint 0 §1.8** (bắt buộc, gated trước Sprint 1)
+**Blocker:** Device test cần máy thật (không chạy được trong env này) — Sprint 1/2/3 chờ gate
 
 ### [2026-09-03] Release-prep batch (ads thật + SDK36 + cleartext + icon + Sentry + nav)
 - **AdMob production setup:** real App ID in manifest
@@ -55,6 +55,27 @@
 
 ## Recent Activity
 
+### [2026-09-04] plan5_final — Sprint 0 completion (§1.6 + §1.7)
+- Sprint A (plan4) items §1.1–§1.5 đã merge từ commit `54f5c7d` (CI run 33832808067 green) —
+  plan5_final §0 premise "chưa thực thi" là STALE, chỉ còn 2 bổ sung §1.6/§1.7 + gate device test.
+- **§1.6 Graceful Pro-expiry (Kotlin):** `QuoteWidgetProvider` thêm `isExpiredLocked()`
+  (pass hết hạn + số widget cấu hình > free limit + không phải widget cũ nhất → lock) +
+  `showLockedPrompt(message)` dùng chung (refactor từ `showUpgradePrompt`). Widget thứ 2
+  render "24h Pass Expired\nTap to renew" thay vì giữ content âm thầm / biến mất; tap →
+  route=paywall deep link (A-5) → paywall sheet. Widget cũ nhất (free slot) vẫn chạy.
+  Check nằm trong `updateAppWidget()` → MỌI render path tôn trọng lock.
+- **§1.7 Quick Share Undo (Flutter):** `ShareService.saveToCollection` trả `Item?`
+  (Undo target chính xác); `_handlePendingShare` show SnackBar "Saved to X" 10s + action
+  **Undo** → soft-delete item (Trash, recoverable) + refresh widget của collection.
+  Extract `lib/widgets/share_undo_snackbar.dart` (testable không cần Hive trong
+  testWidgets/FakeAsync). Fix kèm: `showDialog` multi-collection dùng navigator-key
+  context (trước dùng app-level context ở TRÊN MaterialApp → crash tiềm ẩn khi
+  user >1 collection share).
+- Tests: 84 → **91** (4 share_service_test + 3 quick_share_undo_test). analyze exit 0.
+- Openspec: `openspec/changes/sprint0-completion/`.
+- CI run: (chờ push). Device test §1.8 = manual gate → Sprint 1/2/3 (plan5 §2–§4) chưa mở.
+
+
 ### [2026-09-03] Sprint-next Tasks 1-7 (prompt_sprint_next.md)
 - **Task 1 (P0)** — Monetization pivot → rewarded-ad unlock 24h:
   - `IapService` Pro time-bound: `DateTime? proUnlockedUntil`, `isPro` = now < expiry;
@@ -87,13 +108,18 @@
 ## Test Status
 
 ```
-65/65 tests pass (0 errors, 0 warnings on flutter analyze)
+91/91 tests pass (0 errors, 0 warnings on flutter analyze)
 ├── widget_limit_test.dart: 11
-├── storage_service_test.dart: 26 (incl. 2 time-bound limit re-lock)
+├── storage_service_test.dart: 29 (incl. A1/A2 native-count + reconciliation)
 ├── rotation_service_test.dart: 11
-├── iap_service_test.dart: 6 (time-bound Pro, 24h unlock/expiry, persistence)
-├── curated_themes_test.dart: 4 (theme ↔ native drawable parity)
-├── trash_test.dart: 9 (soft-delete/restore/purge)
+├── iap_service_test.dart: 7
+├── curated_themes_test.dart: 4
+├── trash_test.dart: 9
+├── interstitial_ad_test.dart: 6
+├── rewarded_ad_service_test.dart: 3
+├── paywall_sheet_test.dart: 4
+├── share_service_test.dart: 4 (plan5 §1.7 Undo target)
+├── quick_share_undo_test.dart: 3 (plan5 §1.7 snackbar UI)
 └── widget_test.dart: 1
 ```
 

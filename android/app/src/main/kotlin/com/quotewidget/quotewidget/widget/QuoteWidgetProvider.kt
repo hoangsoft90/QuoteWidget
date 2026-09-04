@@ -57,7 +57,8 @@ class QuoteWidgetProvider : AppWidgetProvider() {
 
             if (!isConfigured && !isPro && configuredIds.size >= FREE_WIDGET_LIMIT) {
                 // Free tier: already has 1 configured widget, show upgrade prompt
-                showUpgradePrompt(context, appWidgetManager, appWidgetId)
+                showLockedPrompt(
+                    context, appWidgetManager, appWidgetId, "Upgrade to Pro\nto add more widgets")
             } else {
                 // Both Pro new widgets and Free first widget: show "Tap to set up"
                 // updateAppWidget reads SharedPreferences; if empty → shows "Tap to set up"
@@ -188,6 +189,17 @@ class QuoteWidgetProvider : AppWidgetProvider() {
         appWidgetManager: AppWidgetManager,
         appWidgetId: Int
     ) {
+        // plan5 Sprint 0 §1.6: a configured widget beyond the Free slot shows
+        // "24h Pass Expired — Tap to renew" once the 24h rewarded-ad pass ran
+        // out (instead of silently keeping content or disappearing). The check
+        // lives here — not just in onUpdate — so EVERY render path (system
+        // refresh, options changed, app-initiated update, tap) honors the lock.
+        if (isExpiredLocked(context, appWidgetId)) {
+            showLockedPrompt(
+                context, appWidgetManager, appWidgetId, "24h Pass Expired\nTap to renew")
+            return
+        }
+
         val prefix = "widget_$appWidgetId"
 
         // Read widget state (from FlutterSharedPreferences via helpers)
@@ -315,20 +327,40 @@ class QuoteWidgetProvider : AppWidgetProvider() {
         appWidgetManager.updateAppWidget(appWidgetId, views)
     }
 
-    private fun showUpgradePrompt(
+    /**
+     * plan5 Sprint 0 §1.6: true when the 24h Pro pass has expired AND more
+     * widgets are configured than the Free limit AND this widget is not the
+     * oldest one. The oldest (smallest appWidgetId — Android assigns widget ids
+     * monotonically, so the smallest is the first-configured) keeps working as
+     * the Free slot; the extras lock and show the renew prompt.
+     */
+    private fun isExpiredLocked(context: Context, appWidgetId: Int): Boolean {
+        if (isProActive(context)) return false
+        val configuredIds = getConfiguredWidgetIds(context)
+        if (configuredIds.size <= FREE_WIDGET_LIMIT) return false
+        if (!configuredIds.contains(appWidgetId)) return false
+        return appWidgetId != configuredIds.min()
+    }
+
+    /**
+     * Renders a full-widget lock prompt (gray, no progress) whose tap opens the
+     * app with route=paywall — plan4 Sprint A-5: MainActivity persists
+     * pending_route=paywall and the app opens the paywall bottom sheet directly
+     * instead of the plain home screen. Shared by the unconfigured "Upgrade to
+     * Pro" prompt and the expired "24h Pass Expired — Tap to renew" prompt.
+     */
+    private fun showLockedPrompt(
         context: Context,
         appWidgetManager: AppWidgetManager,
-        appWidgetId: Int
+        appWidgetId: Int,
+        message: String
     ) {
         val views = RemoteViews(context.packageName, R.layout.widget_small)
-        views.setTextViewText(R.id.widget_text, "Upgrade to Pro\nto add more widgets")
+        views.setTextViewText(R.id.widget_text, message)
         views.setTextColor(R.id.widget_text, 0xFF888888.toInt())
         views.setInt(R.id.widget_text, "setBackgroundColor", 0xFFF5F5F5.toInt())
         views.setViewVisibility(R.id.widget_progress, android.view.View.GONE)
 
-        // Tap opens app (to purchase Pro) — plan4 Sprint A-5: mark the route
-        // so MainActivity can persist pending_route=paywall and the app opens
-        // the paywall bottom sheet directly instead of the plain home screen.
         val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)
         if (intent != null) {
             intent.putExtra("route", "paywall")

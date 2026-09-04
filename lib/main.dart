@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'models/item_model.dart';
 import 'services/storage_service.dart';
 import 'services/widget_service.dart';
 import 'services/widget_data_bridge.dart';
@@ -17,6 +18,7 @@ import 'screens/onboarding_screen.dart';
 import 'screens/collection_picker_dialog.dart';
 import 'screens/widget_setup_screen.dart';
 import 'widgets/paywall_sheet.dart';
+import 'widgets/share_undo_snackbar.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -275,52 +277,65 @@ class _QuoteWidgetAppState extends State<QuoteWidgetApp> with WidgetsBindingObse
       final collections = widget.storageService.getAllCollections();
 
       if (collections.isEmpty) {
-        // Toast (system-level) — the SnackBar would only be visible while the
-        // app UI is on screen, which is not guaranteed for share processing.
+        // Toast (system-level) — no app screen is guaranteed to be visible.
         ToastService.show('Create a collection first to save shared content');
         return;
       }
 
-      Future<void> onSaved(bool success, String collectionName) async {
-        if (success) {
-          await ToastService.show('Saved to $collectionName');
-        } else {
+      // The save runs post-frame while the app UI is on screen, so the
+      // confirmation is a SnackBar with an Undo action (plan5 Sprint 0 §1.7):
+      // visible, tappable, auto-expires after 10s. This state sits ABOVE
+      // MaterialApp's Navigator/ScaffoldMessenger, so use the navigator-key
+      // context — the app-level context would crash showDialog/ScaffoldMessenger.
+      final navigatorContext = _navigatorKey.currentContext;
+
+      // After a successful save, show "Saved to X" + Undo (soft-delete the
+      // just-created item + refresh affected widgets). Failures keep the
+      // system Toast — there is nothing to undo.
+      void confirmSaved(
+          Item savedItem, String collectionName, String collectionId) {
+        if (navigatorContext == null || !navigatorContext.mounted) return;
+        final messenger = ScaffoldMessenger.of(navigatorContext);
+        showShareUndoSnackBar(
+          messenger,
+          collectionName: collectionName,
+          onUndo: () async {
+            // Undo = soft-delete (app's Trash model, recoverable) of the
+            // exact item just saved + refresh any widget showing this
+            // collection so the new content disappears.
+            await widget.storageService.deleteItem(savedItem.id);
+            await widget.widgetService.updateWidgetsForCollection(collectionId);
+          },
+        );
+      }
+
+      Future<void> saveAndConfirm(String collectionId, String collectionName) async {
+        final saved = await shareService.saveToCollection(
+          text: widget.pendingShareText!,
+          collectionId: collectionId,
+        );
+        if (saved == null) {
           await ToastService.show('Failed to save');
+          return;
         }
+        // Refresh any widget showing this collection so new content shows.
+        await widget.widgetService.updateWidgetsForCollection(collectionId);
+        confirmSaved(saved, collectionName, collectionId);
       }
 
       if (collections.length == 1) {
         // Only 1 collection → save straight to it (no app-ask needed).
         final col = collections.first;
-        shareService.saveToCollection(
-          text: widget.pendingShareText!,
-          collectionId: col.id,
-        ).then((success) async {
-          await onSaved(success, col.name);
-          // Refresh any widget showing this collection so new content shows.
-          if (success) {
-            await widget.widgetService.updateWidgetsForCollection(col.id);
-          }
-        });
-      } else {
-        // Multiple collections → ask which one (acceptable exception: opening
-        // the picker is the only unambiguous way to choose a target).
+        saveAndConfirm(col.id, col.name);
+      } else if (navigatorContext != null) {
+        // Multiple collections → ask which one (opening the picker is the only
+        // unambiguous way to choose a target).
         showDialog(
-          context: context,
+          context: navigatorContext,
           builder: (context) => CollectionPickerDialog(
             storageService: widget.storageService,
             onSelected: (collection) {
-              shareService.saveToCollection(
-                text: widget.pendingShareText!,
-                collectionId: collection.id,
-              ).then((success) async {
-                await onSaved(success, collection.name);
-                // Refresh any widget showing this collection so new content
-                // shows immediately.
-                if (success) {
-                  await widget.widgetService.updateWidgetsForCollection(collection.id);
-                }
-              });
+              saveAndConfirm(collection.id, collection.name);
             },
           ),
         );

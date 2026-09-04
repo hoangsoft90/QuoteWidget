@@ -52,6 +52,11 @@
 ### Share
 - [x] ShareReceiverActivity (Android share sheet → save to collection)
 - [x] Pending share flow (single collection auto-save, multi-collection picker)
+- [x] **Quick Share Undo** — 10s "Saved to X" SnackBar + Undo action (soft-delete to Trash) (plan5 §1.7)
+
+### Pro / Widget limits
+- [x] **Graceful Pro-expiry on widget** — "24h Pass Expired — Tap to renew" → paywall deep link (plan5 §1.6)
+- [x] Multi-collection share picker uses navigator-key context (fix latent above-MaterialApp crash)
 
 ### Deep Link / Cold Start
 - [x] Unconfigured widget tap → WidgetSetupScreen
@@ -73,7 +78,7 @@
 
 ### Immediate
 - [ ] **Enable GitHub Pages** in repo Settings (manual: Settings → Pages → Source: GitHub Actions) — first push to main with `docs/` will trigger deploy
-- [ ] **Device test** — verify on real Android device: FAB no longer overlaps ads, Settings has no purchase buttons, paywall shows only Watch Ad, privacy link opens
+- [ ] **Device test (plan5 §1.8 gate)** — real Android device(s), Samsung + Pixel/stock: xoá Collection đang gắn Widget A → thêm Widget B không bị kẹt "Upgrade to Pro"; `wcfg_*` sạch sau khi kéo widget khỏi Home Screen; force-stop + reboot vẫn render đúng; Pro 24h hết hạn khi app đóng hoàn toàn vẫn tự khoá (widget 2 → "24h Pass Expired — Tap to renew", widget 1 vẫn chạy); 2 widget rotation độc lập; Quick Share Undo (save + Undo trong 10s); FAB không đè ads; paywall chỉ Watch Ad; privacy link mở
 
 ### Monetization
 - [ ] **Register real rewarded ad unit ID** in AdMob console (current: Google sample test ID) — required before disabling `TEST_ADS`
