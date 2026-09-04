@@ -35,6 +35,6 @@
 - [x] `flutter analyze` → exit 0, "No issues found!".
 - [x] `flutter test` → `+75: All tests passed!` (71 baseline + 3 Fix A + 1 Fix B;
   per-file sum agrees: 4+7+6+3+11+23+9+11+1 = 75).
-- [ ] Push to `main`; GH Actions run (analyze + test + debug build + release build)
-  green — read real logs.
-- [ ] Update `working.md` with task results + CI run id.
+- [x] Push to `main` (commit `e1a39a7`); GH Actions run **33768066875** green —
+  read real logs: Analyze ✓, Run tests ✓, Build debug APK ✓, Build release APK ✓.
+- [x] Update `working.md` with task results + CI run id.
