@@ -73,7 +73,8 @@
   user >1 collection share).
 - Tests: 84 → **91** (4 share_service_test + 3 quick_share_undo_test). analyze exit 0.
 - Openspec: `openspec/changes/sprint0-completion/`.
-- CI run: (chờ push). Device test §1.8 = manual gate → Sprint 1/2/3 (plan5 §2–§4) chưa mở.
+- CI run **33857086225** (commit `7eed09c`) green — analyze + tests + debug/release APK
+  (Kotlin §1.6 compile gate). Device test §1.8 = manual gate → Sprint 1/2/3 (plan5 §2–§4) chưa mở.
 
 
 ### [2026-09-03] Sprint-next Tasks 1-7 (prompt_sprint_next.md)

@@ -17,5 +17,5 @@
 ## Verify
 - [x] `flutter analyze` exit 0 — "No issues found!"
 - [x] `flutter test` all pass — **91/91** (84 baseline + 4 share_service + 3 quick_share_undo)
-- [ ] Commit + push → CI debug + release green
+- [x] Commit + push → CI debug + release green — run **33857086225** (commit `7eed09c`) completed success
 - [ ] Device-test checklist (§1.8) — **manual gate, cannot run in this env**
