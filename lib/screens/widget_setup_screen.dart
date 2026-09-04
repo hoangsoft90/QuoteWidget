@@ -13,6 +13,7 @@ import '../services/rewarded_ad_service.dart';
 import 'collection_detail_screen.dart';
 import 'home_screen.dart';
 import 'package:home_widget/home_widget.dart';
+import '../widgets/paywall_sheet.dart';
 
 /// Screen shown when user taps an unconfigured/empty widget on Home Screen.
 /// If [collectionId] is null → shows collection picker (first-time setup).
@@ -190,73 +191,22 @@ class _WidgetSetupScreenState extends State<WidgetSetupScreen> {
     }
   }
 
-  /// Show the rewarded-ad unlock dialog when the Free widget limit blocks
-  /// a 2nd widget. On successful reward, retries the save.
+  /// Show the paywall when the Free widget limit blocks a 2nd widget (plan4
+  /// Sprint A-5: shared with the native upgrade-prompt deep link). On a
+  /// successful unlock, retries the save so the setup completes in one flow.
   Future<void> _showUnlockDialog() async {
     if (!mounted) return;
-    final unlocked = await showDialog<String>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: const Text('Widget Limit Reached'),
-        content: const Text(
-          'Free tier includes 1 widget. Watch a short ad to unlock Pro for 24h '
-          'and add more widgets — or buy Remove Ads Forever to keep Pro '
-          'permanently.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop('buy'),
-            child: const Text('Remove Ads Forever'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop('ad'),
-            child: const Text('Watch Ad — Unlock 24h'),
-          ),
-        ],
-      ),
+    final result = await showPaywallSheet(
+      context,
+      iapService: widget.iapService,
+      rewardedAdService: widget.rewardedAdService,
     );
-
-    if (unlocked == 'ad') {
-      final rewarded = await widget.rewardedAdService.showRewardedAd();
-      if (rewarded && widget.iapService.isPro) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Pro unlocked for 24h! Now add your widget.')),
-          );
-        }
-        await _save();
-      } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Ad not finished. Please try again.')),
-          );
-        }
-      }
-    } else if (unlocked == 'buy') {
-      final started = await widget.iapService.buyPro();
-      if (mounted) {
-        if (widget.iapService.isPro) {
-          // Grant already applied via the purchase stream → retry the setup
-          // right away, exactly like the rewarded-ad path (plan3 Fix C).
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Pro unlocked forever! Now add your widget.'),
-            ),
-          );
-          await _save();
-        } else if (!started) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Purchase unavailable right now.')),
-          );
-        }
-        // started && !isPro: the store sheet closed before the grant event
-        // landed — Pro activates momentarily; user taps "Set Up Widget" again.
-      }
+    if (mounted && (result == PaywallResult.adGranted ||
+        result == PaywallResult.buyGranted)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Now add your widget.')),
+      );
+      await _save();
     }
   }
 

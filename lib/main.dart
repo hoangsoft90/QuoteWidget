@@ -3,6 +3,7 @@ import 'package:sentry_flutter/sentry_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'services/storage_service.dart';
 import 'services/widget_service.dart';
+import 'services/widget_data_bridge.dart';
 import 'services/backup_service.dart';
 import 'services/share_service.dart';
 import 'services/snapshot_manager.dart';
@@ -15,6 +16,7 @@ import 'screens/home_screen.dart';
 import 'screens/onboarding_screen.dart';
 import 'screens/collection_picker_dialog.dart';
 import 'screens/widget_setup_screen.dart';
+import 'widgets/paywall_sheet.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -33,6 +35,20 @@ void main() async {
   // Initialize storage service
   final storageService = StorageService();
   await storageService.init();
+
+  // plan4 Sprint A-1: free-limit gate reads the NATIVE configured-widget count
+  // (configured_widget_ids) instead of trusting the Hive box alone — the two
+  // can diverge and leave a Free user with a widget stuck on "Upgrade to Pro".
+  storageService.setWidgetCountProvider(
+    WidgetDataBridge.getNativeConfiguredWidgetCount,
+  );
+  // plan4 Sprint A-2: hybrid reconciliation — compare Hive configs with the
+  // native registry at startup and clean orphaned configs whose physical
+  // widget no longer exists (fast path: counts match → no full scan).
+  storageService.setWidgetIdsProvider(
+    WidgetDataBridge.getNativeConfiguredWidgetIds,
+  );
+  await storageService.reconcileWidgetConfigs();
 
   // Purge trash items/collections past the 30-day retention (Task 7).
   await storageService.purgeTrash();
@@ -85,6 +101,15 @@ void main() async {
     await prefs.remove('tapped_collection_id');
   }
 
+  // plan4 Sprint A-5: native "Upgrade to Pro" widget tap → open the paywall
+  // bottom sheet on cold start. MainActivity persists pending_route (both
+  // prefs files); read + clear it here, then hand the flag to the app.
+  final pendingRoute = prefs.getString('pending_route');
+  final showPaywallOnStart = pendingRoute == 'paywall';
+  if (pendingRoute != null) {
+    await prefs.remove('pending_route');
+  }
+
   // Detect unconfigured widgets from Android system picker
   // Kotlin writes 'configured_widget_ids' to SharedPreferences when widgets are placed.
   // On app open, we check for widgets that exist but aren't in our Hive store.
@@ -115,6 +140,7 @@ void main() async {
     pendingShareText: pendingShareText,
     tappedWidgetId: tappedWidgetId,
     tappedCollectionId: tappedCollectionId,
+    showPaywallOnStart: showPaywallOnStart,
   ));
 }
 
@@ -130,6 +156,7 @@ class QuoteWidgetApp extends StatefulWidget {
   final String? pendingShareText;
   final int? tappedWidgetId;
   final String? tappedCollectionId;
+  final bool showPaywallOnStart;
 
   const QuoteWidgetApp({
     super.key,
@@ -144,6 +171,7 @@ class QuoteWidgetApp extends StatefulWidget {
     this.pendingShareText,
     this.tappedWidgetId,
     this.tappedCollectionId,
+    this.showPaywallOnStart = false,
   });
 
   @override
@@ -151,12 +179,19 @@ class QuoteWidgetApp extends StatefulWidget {
 }
 
 class _QuoteWidgetAppState extends State<QuoteWidgetApp> with WidgetsBindingObserver {
+  // plan4 Sprint A-5: the app widget sits ABOVE MaterialApp's Navigator, so
+  // Navigator.of(this.context) would fail — use the navigator key instead.
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _handlePendingShare();
+      if (widget.showPaywallOnStart) {
+        _openPaywall();
+      }
     });
   }
 
@@ -170,7 +205,36 @@ class _QuoteWidgetAppState extends State<QuoteWidgetApp> with WidgetsBindingObse
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _checkPendingWidgetTap();
+      // plan4 Sprint A-2: reconcile Hive ↔ native on resume (a widget may
+      // have been added/removed on the Home Screen while the app was away).
+      widget.storageService.reconcileWidgetConfigs();
+      // plan4 Sprint A-5: warm-start paywall deep link (tapped "Upgrade to
+      // Pro" on the widget while the app was backgrounded).
+      _checkPendingPaywallRoute();
     }
+  }
+
+  /// Open the shared paywall sheet (plan4 Sprint A-5). Uses the navigator
+  /// key so it works regardless of which route is on top.
+  Future<void> _openPaywall() async {
+    final navigatorContext = _navigatorKey.currentContext;
+    if (navigatorContext == null || !mounted) return;
+    await showPaywallSheet(
+      navigatorContext,
+      iapService: widget.iapService,
+      rewardedAdService: widget.rewardedAdService,
+    );
+  }
+
+  /// Warm-start variant: check pending_route in prefs (written by
+  /// MainActivity.onNewIntent) and clear it.
+  Future<void> _checkPendingPaywallRoute() async {
+    final prefs = await SharedPreferences.getInstance();
+    final route = prefs.getString('pending_route');
+    if (route != 'paywall') return;
+    await prefs.remove('pending_route');
+    if (!mounted) return;
+    await _openPaywall();
   }
 
   /// Fallback for warm-start: when app resumes, check if a new widget tap
@@ -267,6 +331,7 @@ class _QuoteWidgetAppState extends State<QuoteWidgetApp> with WidgetsBindingObse
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: _navigatorKey,
       title: 'Quote Widget - Your Words',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(

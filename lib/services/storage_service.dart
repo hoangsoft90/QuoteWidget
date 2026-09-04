@@ -3,6 +3,7 @@ import '../models/collection_model.dart';
 import '../models/item_model.dart';
 import '../models/widget_config_model.dart';
 import 'snapshot_manager.dart';
+import 'widget_data_bridge.dart';
 
 class StorageService {
   static const String collectionsBoxName = 'collections';
@@ -15,6 +16,21 @@ class StorageService {
   SnapshotManager? _snapshotManager;
   bool Function()? _isProProvider;
   bool _isPro = false;
+
+  /// Injectable provider for the NATIVE configured-widget count
+  /// (configured_widget_ids in SharedPreferences). When null (unit tests,
+  /// non-Android, channel unavailable) the free-limit gate falls back to the
+  /// Hive box length so behavior never silently loosens.
+  Future<int?> Function()? _widgetCountProvider;
+
+  /// Injectable provider for the NATIVE configured-widget appWidgetIds.
+  /// Used by [reconcileWidgetConfigs] to detect orphaned Hive configs.
+  Future<List<int>?> Function()? _widgetIdsProvider;
+
+  /// Guards [reconcileWidgetConfigs] against re-entrant runs (resume firing
+  /// while the start-up reconciliation is still scanning).
+  bool _reconciling = false;
+
   static bool _adaptersRegistered = false;
 
   /// Inject SnapshotManager for safety snapshots before destructive operations.
@@ -34,6 +50,30 @@ class StorageService {
   /// Called once at startup after IapService initializes.
   void setProStatus(bool isPro) {
     _isPro = isPro;
+  }
+
+  /// Inject the native configured-widget count provider (plan4 Sprint A-1).
+  /// Production wires it to [WidgetDataBridge.getNativeConfiguredWidgetCount];
+  /// tests inject a fake so the gate is verified without platform channels.
+  void setWidgetCountProvider(Future<int?> Function() provider) {
+    _widgetCountProvider = provider;
+  }
+
+  /// Inject the native configured-widget appWidgetIds provider (plan4 A-2).
+  /// Production wires it to [WidgetDataBridge.getNativeConfiguredWidgetIds].
+  void setWidgetIdsProvider(Future<List<int>?> Function() provider) {
+    _widgetIdsProvider = provider;
+  }
+
+  /// Effective widget count for the free-limit gate: native count when
+  /// available, Hive box length otherwise (same behavior as before the fix).
+  Future<int> _effectiveWidgetCount() async {
+    final provider = _widgetCountProvider;
+    if (provider != null) {
+      final nativeCount = await provider();
+      if (nativeCount != null) return nativeCount;
+    }
+    return _widgetConfigsBox.length;
   }
 
   /// Current Pro status — prefers the live provider, falls back to the
@@ -315,12 +355,18 @@ class StorageService {
 
   /// Creates a new WidgetConfig.
   /// Throws [WidgetLimitReachedException] if Free user already has ≥1 widget.
+  ///
+  /// plan4 Sprint A-1: the gate reads the NATIVE configured-widget count
+  /// (configured_widget_ids — the physical source of truth), NOT the Hive box
+  /// alone. Without this, deleting the collection of the only configured
+  /// widget empties the Hive box and lets Free users configure a 2nd widget
+  /// that then shows "Upgrade to Pro" forever natively (dead-end trap).
   Future<WidgetConfig> createWidgetConfig({
     required String collectionId,
     SizeCategory sizeCategory = SizeCategory.small,
   }) async {
     // Free tier: max 1 widget. Pro: unlimited.
-    if (!_isProActive && _widgetConfigsBox.isNotEmpty) {
+    if (!_isProActive && await _effectiveWidgetCount() >= 1) {
       throw WidgetLimitReachedException();
     }
 
@@ -330,6 +376,42 @@ class StorageService {
     );
     await _widgetConfigsBox.put(config.id, config);
     return config;
+  }
+
+  /// Hybrid reconciliation (plan4 Sprint A-2).
+  ///
+  /// Compares the Hive WidgetConfig count with the NATIVE configured-widget
+  /// count. Equal → fast path (no full scan — not every launch). Differ →
+  /// full scan: a Hive config whose mapped appWidgetId is no longer in the
+  /// native set is an orphan (its physical widget is gone, e.g. deleted off
+  /// the Home Screen while the app was closed) → remove the config AND its
+  /// wcfg_* mapping (both directions). Native ids without a Hive config are
+  /// unconfigured widgets — left alone ("Tap to set up" state).
+  Future<void> reconcileWidgetConfigs() async {
+    final provider = _widgetIdsProvider;
+    if (provider == null || _reconciling) return;
+
+    final nativeIds = await provider();
+    if (nativeIds == null) return; // channel unavailable → don't destroy data
+
+    final hiveConfigs = _widgetConfigsBox.values.toList();
+    // Fast path: counts agree → skip full scan (plan §2 anti-pattern guard).
+    if (hiveConfigs.length == nativeIds.length) return;
+
+    _reconciling = true;
+    try {
+      for (final config in hiveConfigs) {
+        final appWidgetId =
+            await WidgetDataBridge.getAppWidgetIdForConfig(config.id);
+        if (appWidgetId != null && !nativeIds.contains(appWidgetId)) {
+          // Orphan: physical widget no longer exists → clean config + mapping.
+          await WidgetDataBridge.removeWidgetMapping(appWidgetId);
+          await _widgetConfigsBox.delete(config.id);
+        }
+      }
+    } finally {
+      _reconciling = false;
+    }
   }
 
   List<WidgetConfig> getAllWidgetConfigs() {

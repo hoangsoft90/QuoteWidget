@@ -258,6 +258,18 @@ class _BackupScreenState extends State<BackupScreen> {
             ),
           ),
 
+          // plan4 §6: restore semantics — WidgetConfig (Hive UUID) and
+          // appWidgetId (Android) are different ID spaces, so a restore never
+          // auto-re-attaches the physical Home Screen widgets.
+          const Padding(
+            padding: EdgeInsets.only(top: 8),
+            child: Text(
+              'Restore khôi phục Collections và cài đặt Widget. '
+              'Widget đã có trên Home Screen có thể cần cấu hình lại thủ công.',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+          ),
+
           const Divider(height: 32),
 
           // Snapshots Section

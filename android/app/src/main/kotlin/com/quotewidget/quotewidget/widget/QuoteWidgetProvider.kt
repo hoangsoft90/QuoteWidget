@@ -17,6 +17,14 @@ class QuoteWidgetProvider : AppWidgetProvider() {
         private const val KEY_IS_PRO_EXPIRES_AT = "is_pro_expires_at"
         private const val KEY_CONFIGURED_WIDGETS = "configured_widget_ids"
 
+        // plan4 Sprint A-4: schema version for the prefs this provider reads.
+        // Bump PREFS_VERSION whenever a stored key/value format changes and
+        // add the migration in migratePreferencesIfNeeded below. This is the
+        // safety net for the first OTA that changes any key — without it an
+        // old-format install would misread new keys with no recovery path.
+        private const val PREFS_VERSION = 1
+        private const val KEY_PREFS_VERSION = "prefs_version"
+
         fun updateAllWidgets(context: Context) {
             val appWidgetManager = AppWidgetManager.getInstance(context)
             val componentName = android.content.ComponentName(context, QuoteWidgetProvider::class.java)
@@ -34,6 +42,10 @@ class QuoteWidgetProvider : AppWidgetProvider() {
         appWidgetManager: AppWidgetManager,
         appWidgetIds: IntArray
     ) {
+        // plan4 Sprint A-4: run migrations once per installed version (cheap
+        // no-op today — the hook must exist before any key format changes).
+        migratePreferencesIfNeeded(context)
+
         // Time-bound Pro: true only if is_pro AND not expired (epoch millis).
         // A value of 0 or missing means either never unlocked (is_pro false)
         // or permanent Pro (DateTime(9999) serialized) — both handled here.
@@ -67,6 +79,7 @@ class QuoteWidgetProvider : AppWidgetProvider() {
     override fun onDeleted(context: Context, appWidgetIds: IntArray) {
         super.onDeleted(context, appWidgetIds)
         val prefs = getPrefs(context)
+        val flPrefs = getFlutterPrefs(context)
         val configuredIds = getConfiguredWidgetIds(context).toMutableSet()
         for (appWidgetId in appWidgetIds) {
             configuredIds.remove(appWidgetId)
@@ -96,9 +109,27 @@ class QuoteWidgetProvider : AppWidgetProvider() {
                 .remove("flutter.${prefix}_sizeCategory")
                 .remove("flutter.${prefix}_showProgress")
                 .apply()
+
+            // plan4 Sprint A-3: clean the wcfg_* Hive↔widget mapping for this
+            // widget id (both directions, both prefix variants). Dart writes
+            // these keys via SharedPreferences → they live in
+            // FlutterSharedPreferences with the "flutter." prefix. Removing a
+            // widget from the Home Screen must not leave a stale mapping that
+            // ties a deleted appWidgetId to a Hive WidgetConfig.
+            val wcfgKey = "wcfg_${appWidgetId}_configId"
+            val configId = flPrefs.getString("flutter.$wcfgKey", null)
+                ?: flPrefs.getString(wcfgKey, null)
+            if (configId != null) {
+                val reverseKey = "wcfg_${configId}_appWidgetId"
+                flPrefs.edit()
+                    .remove("flutter.$wcfgKey")
+                    .remove(wcfgKey)
+                    .remove("flutter.$reverseKey")
+                    .remove(reverseKey)
+                    .apply()
+            }
         }
         // Save updated configured IDs list to FlutterSharedPreferences
-        val flPrefs = getFlutterPrefs(context)
         flPrefs.edit().putString(KEY_CONFIGURED_WIDGETS, configuredIds.joinToString(",")).apply()
         flPrefs.edit().putString("flutter.$KEY_CONFIGURED_WIDGETS", configuredIds.joinToString(",")).apply()
     }
@@ -187,11 +218,10 @@ class QuoteWidgetProvider : AppWidgetProvider() {
             else -> text
         }
 
-        // Set text color based on state
-        val displayTextColor = when {
-            collectionId == null || isRemoved -> 0xFF888888.toInt()
-            else -> textColor
-        }
+        // Set text color based on state. collectionId is a non-null String
+        // (getString default ""), so the only dead-state is a removed
+        // collection — the null check was unreachable (plan4 §6 cleanup).
+        val displayTextColor = if (isRemoved) 0xFF888888.toInt() else textColor
 
         // Choose layout based on size
         val layoutResId = if (sizeCategory == "medium") {
@@ -296,9 +326,13 @@ class QuoteWidgetProvider : AppWidgetProvider() {
         views.setInt(R.id.widget_text, "setBackgroundColor", 0xFFF5F5F5.toInt())
         views.setViewVisibility(R.id.widget_progress, android.view.View.GONE)
 
-        // Tap opens app (to purchase Pro)
+        // Tap opens app (to purchase Pro) — plan4 Sprint A-5: mark the route
+        // so MainActivity can persist pending_route=paywall and the app opens
+        // the paywall bottom sheet directly instead of the plain home screen.
         val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)
         if (intent != null) {
+            intent.putExtra("route", "paywall")
+            intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             val pendingIntent = PendingIntent.getActivity(
                 context, appWidgetId, intent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
@@ -322,6 +356,25 @@ class QuoteWidgetProvider : AppWidgetProvider() {
             return true
         }
         return System.currentTimeMillis() < expiresAt
+    }
+
+    /**
+     * plan4 Sprint A-4: one-time per-version migration hook. Reads the stored
+     * prefs version (0 = never set / pre-version era) and, if older than
+     * PREFS_VERSION, runs each missing migration in order then stamps the new
+     * version. Body is intentionally empty today — the schema is unchanged;
+     * future key-format changes add their case here (keyed by the version
+     * that introduced them).
+     */
+    private fun migratePreferencesIfNeeded(context: Context) {
+        val flPrefs = getFlutterPrefs(context)
+        val storedVersion = flPrefs.getInt(KEY_PREFS_VERSION, 0)
+        if (storedVersion >= PREFS_VERSION) return
+
+        // Example future migration shape (DO NOT add for the current schema):
+        // if (storedVersion < 2) { /* rewrite key X → Y */ }
+
+        flPrefs.edit().putInt(KEY_PREFS_VERSION, PREFS_VERSION).apply()
     }
 
     /**

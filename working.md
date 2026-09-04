@@ -2,9 +2,9 @@
 
 ## Current Status
 
-**Phase:** Sprint-next (prompt_sprint_next.md) P0→P0.5→P1 complete — Tasks 1-7 done
-**Next:** CI build verify on GH Actions (2026-09-03 changes) + real-device test
-**Blocker:** None — 71/71 tests pass, analyze clean
+**Phase:** plan4_final Sprint A (Stability) code-complete — 85/85 tests pass
+**Next:** CI verify (push mới nhất) → **device test Sprint A §2.6** (bắt buộc, gated trước Sprint B)
+**Blocker:** Device test cần máy thật (không chạy được trong env này) — Sprint B/C/D chờ
 
 ### [2026-09-03] Release-prep batch (ads thật + SDK36 + cleartext + icon + Sentry + nav)
 - **AdMob production setup:** real App ID in manifest
@@ -37,6 +37,21 @@
 - **CI:** workflow Flutter 3.32.4 → 3.47.1, thêm `flutter analyze` + build
   release APK step (2 artifacts). KHÔNG build local — chỉ GH Actions.
 - Tests: +6 `test/interstitial_ad_test.dart` (65 → 71).
+
+### [2026-09-03] plan3_final — Pro unlock reliability (A/B/C)
+- **Fix A (HIGH)** — reward grant race: `RewardedAdService` now reports success
+  only AFTER `unlockProFor24h()` persistence completes. New `resolveRewardOutcome`
+  seam awaited in dismiss + timeout paths; failed-to-show → false. Test:
+  `test/rewarded_ad_service_test.dart` (3 tests, fake IapService).
+- **Fix B (MEDIUM)** — `IapService._persist()` now calls `HomeWidget.updateWidget`
+  after the `is_pro`/`is_pro_expires_at` writes → widget placeholder refresh
+  ngay khi Pro đổi từ Settings/buy/restore. Channel-mock test asserts order.
+- **Fix C (LOW-MEDIUM)** — `_onPurchaseUpdate` async-safe: persist trước
+  `completePurchase`; widget-limit dialog 'buy' branch tự retry `_save()` khi
+  `isPro` đã active.
+- Tests: 71 → 75 (rewarded x3, widget-push x1, khôi phục Permanent-Pro test bị
+  rớt giữa chừng). CI run **33768066875** green (analyze + test + debug + release).
+- Openspec: `openspec/changes/pro-unlock-reliability/` (proposal/design/tasks/specs).
 
 ## Recent Activity
 
@@ -81,6 +96,28 @@
 ├── trash_test.dart: 9 (soft-delete/restore/purge)
 └── widget_test.dart: 1
 ```
+
+### [2026-09-04] plan4_final — Sprint A: Widget Registry / Free-limit Stability
+- **A1 Free-limit gate:** `createWidgetConfig()` giờ đọc NATIVE `configured_widget_ids`
+  qua MethodChannel `quotewidget/widgets` (`getConfiguredWidgetCount`/`getConfiguredWidgetIds`
+  trong MainActivity), fallback Hive khi channel unavailable — fix **dead-end trap**: xoá
+  collection của widget duy nhất (Hive rỗng) trước đây cho phép cấu hình widget 2 →
+  native chặn "Upgrade to Pro" vĩnh viễn. `WidgetDataBridge.getNativeConfiguredWidget*`.
+- **A2 Hybrid reconciliation:** `StorageService.reconcileWidgetConfigs()` — so Hive count
+  vs native count, lệch → quét full xoá orphaned WidgetConfig + wcfg_* mapping cả 2
+  chiều. Chạy lúc app start + resume.
+- **A3 onDeleted() cleanup:** `QuoteWidgetProvider.onDeleted()` xoá luôn
+  `wcfg_<appWidgetId>_configId` / `wcfg_<configId>_appWidgetId` (Kotlin, không qua Dart).
+- **A4 PREFS_VERSION:** `PREFS_VERSION`=1 + `migratePreferencesIfNeeded()` gọi đầu
+  `onUpdate()` — hook migration cho OTA đầu tiên đổi key format.
+- **A5 Paywall deep link:** `showUpgradePrompt()` thêm `route=paywall` → MainActivity
+  persist `pending_route` (cả 2 file prefs) → Flutter đọc lúc start/resume → mở
+  `lib/widgets/paywall_sheet.dart` (Watch Ad 24h / Buy Pro / Cancel) — WidgetSetupScreen
+  dùng chung sheet này (bỏ dialog cũ trùng logic).
+- **§6:** text restore-semantics (VI) trong Backup screen + dọn điều kiện chết
+  `collectionId == null` trong `displayTextColor` (Kotlin).
+- Tests: **85/85** (75 baseline + 3 A1 + 3 A2 + 4 A5 mới). analyze exit 0.
+- CI run: (chờ push) — xem tasks.md sprint-a-stability.
 
 ## Known Issues / TODO
 

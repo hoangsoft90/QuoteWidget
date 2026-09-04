@@ -5,6 +5,8 @@ import 'package:quotewidget/models/collection_model.dart';
 import 'package:quotewidget/models/item_model.dart';
 import 'package:quotewidget/models/widget_config_model.dart';
 import 'package:quotewidget/services/storage_service.dart';
+import 'package:quotewidget/services/widget_data_bridge.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   late StorageService service;
@@ -282,6 +284,127 @@ void main() {
       final retrieved = service.getWidgetConfig(config.id);
       expect(retrieved!.currentIndex, 5);
       expect(retrieved.showProgress, false);
+    });
+
+    test('A1: native count blocks Free 2nd widget even when Hive box is empty', () async {
+      // plan4 Sprint A-1 dead-end trap: the Hive box is empty (the only
+      // WidgetConfig was deleted with its collection) but a physical widget
+      // still exists natively (configured_widget_ids = [1]). The gate must
+      // read the NATIVE count, not the Hive box.
+      final service = StorageService();
+      await service.init(testPath: tempDir.path);
+      service.setWidgetCountProvider(() async => 1);
+
+      final col = await service.createCollection('Test');
+      expect(service.getAllWidgetConfigs(), isEmpty,
+          reason: 'Hive box empty — pre-fix this would NOT block');
+
+      await expectLater(
+        service.createWidgetConfig(collectionId: col.id),
+        throwsA(isA<WidgetLimitReachedException>()),
+        reason: 'Native count 1 ≥ Free limit 1 → must block even with empty Hive',
+      );
+    });
+
+    test('A1: null native count falls back to Hive box length', () async {
+      final service = StorageService();
+      await service.init(testPath: tempDir.path);
+      // Provider returns null (channel unavailable / tests) → Hive fallback.
+      service.setWidgetCountProvider(() async => null);
+
+      final col = await service.createCollection('Test');
+      await service.createWidgetConfig(collectionId: col.id);
+
+      await expectLater(
+        service.createWidgetConfig(collectionId: col.id),
+        throwsA(isA<WidgetLimitReachedException>()),
+        reason: 'Native unavailable → Hive box (1 config) must still block',
+      );
+    });
+
+    test('A1: Pro (24h window) bypasses native-count gate', () async {
+      final service = StorageService();
+      await service.init(testPath: tempDir.path);
+      service.setWidgetCountProvider(() async => 1);
+
+      final col = await service.createCollection('Test');
+      final unlockedUntil = DateTime.now().add(const Duration(hours: 12));
+      service.setProStatusProvider(
+          () => DateTime.now().isBefore(unlockedUntil));
+
+      final second = await service.createWidgetConfig(collectionId: col.id);
+      expect(second, isNotNull,
+          reason: 'Pro within 24h window → native count must not block');
+    });
+  });
+
+  group('A2: Hybrid reconciliation (Hive ↔ native registry)', () {
+    test('orphaned config (mapped id not in native set) is deleted + mapping cleaned',
+        () async {
+      SharedPreferences.setMockInitialValues({});
+      final service = StorageService();
+      await service.init(testPath: tempDir.path);
+
+      final col = await service.createCollection('Test');
+      final config = await service.createWidgetConfig(collectionId: col.id);
+      // Simulate a real mapping: config ↔ appWidgetId 1001.
+      await WidgetDataBridge.registerWidgetMapping(
+        appWidgetId: 1001,
+        configId: config.id,
+      );
+      expect(service.getAllWidgetConfigs().length, 1);
+
+      // Native registry no longer has 1001 (physical widget deleted while
+      // the app was closed) and has 2 unrelated widgets → counts differ
+      // (Hive 1 vs native 2) so the full scan runs.
+      service.setWidgetIdsProvider(() async => [2002, 3003]);
+
+      await service.reconcileWidgetConfigs();
+
+      expect(service.getAllWidgetConfigs(), isEmpty,
+          reason: 'Config mapped to a dead appWidgetId must be removed');
+      // Both directions of the mapping must be gone.
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString('wcfg_1001_configId'), isNull,
+          reason: 'appWidgetId→config mapping must be cleaned');
+      expect(prefs.getString('wcfg_${config.id}_appWidgetId'), isNull,
+          reason: 'config→appWidgetId mapping must be cleaned');
+    });
+
+    test('fast path: counts match → no cleanup even with different ids', () async {
+      SharedPreferences.setMockInitialValues({});
+      final service = StorageService();
+      await service.init(testPath: tempDir.path);
+
+      final col = await service.createCollection('Test');
+      final config = await service.createWidgetConfig(collectionId: col.id);
+      await WidgetDataBridge.registerWidgetMapping(
+        appWidgetId: 1001,
+        configId: config.id,
+      );
+
+      // Native count (1) == Hive count (1) → fast path, no full scan.
+      service.setWidgetIdsProvider(() async => [2002]);
+
+      await service.reconcileWidgetConfigs();
+
+      expect(service.getAllWidgetConfigs().length, 1,
+          reason: 'Counts equal → fast path must not scan/delete');
+    });
+
+    test('reverse: native ids without Hive config are left alone', () async {
+      SharedPreferences.setMockInitialValues({});
+      final service = StorageService();
+      await service.init(testPath: tempDir.path);
+
+      // Hive empty, native has 1 widget → counts differ (0 vs 1), full scan
+      // runs, but there is no Hive config to delete (unconfigured widget).
+      service.setWidgetIdsProvider(() async => [1001]);
+
+      await service.reconcileWidgetConfigs();
+
+      expect(service.getAllWidgetConfigs(), isEmpty,
+          reason: 'Unconfigured native widgets are the "Tap to set up" state — kept');
     });
   });
 

@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Bridge between Flutter and Kotlin for widget SharedPreferences data.
@@ -158,6 +159,35 @@ class WidgetDataBridge {
     if (configId != null) {
       await prefs.remove('$_mappingPrefix${appWidgetId}_configId');
       await prefs.remove('$_mappingPrefix${configId}_appWidgetId');
+    }
+  }
+
+  // ============ Native configured-widget registry (plan4 Sprint A) ============
+  // Kotlin maintains configured_widget_ids in FlutterSharedPreferences as the
+  // authoritative count of physically-configured widgets. Flutter must NOT
+  // trust its own Hive box alone (they can diverge after collection delete
+  // leaves the Hive box empty while the physical widget still exists).
+
+  static const MethodChannel _widgetsChannel = MethodChannel('quotewidget/widgets');
+
+  /// Native configured-widget count (configured_widget_ids). Null when the
+  /// native side is unavailable (unit tests, non-Android) → caller falls back.
+  static Future<int?> getNativeConfiguredWidgetCount() async {
+    try {
+      return await _widgetsChannel.invokeMethod<int>('getConfiguredWidgetCount');
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Native configured-widget appWidgetIds. Null when unavailable.
+  static Future<List<int>?> getNativeConfiguredWidgetIds() async {
+    try {
+      final ids =
+          await _widgetsChannel.invokeListMethod<int>('getConfiguredWidgetIds');
+      return ids;
+    } catch (_) {
+      return null;
     }
   }
 }
