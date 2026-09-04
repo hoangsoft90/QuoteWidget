@@ -1,7 +1,7 @@
 # Features — Quote Widget ("Your Words")
 
 > Tài liệu đầy đủ tính năng + UI của app, đối chiếu trực tiếp với source code.
-> Cập nhật lần cuối: 2026-09-04 (HEAD `6a01dd8`, CI green debug + release).
+> Cập nhật lần cuối: 2026-09-04 (HEAD `4d6ce76`, CI green debug + release).
 
 **App:** Hiển thị nội dung cá nhân (quote, từ vựng, lời nhắc…) trên Home Screen widget Android.
 **Tech:** Flutter 3.47.1 / Dart 3.13.1 · Hive (local DB) · home_widget + Kotlin RemoteViews · Android only (minSdk 24, compileSdk/targetSdk 36).
@@ -49,7 +49,10 @@
 | Collection đã bị xóa | "Collection removed. Tap to choose another." | Mở app để chọn lại |
 | Collection rỗng | "Add some content to this collection." | Mở `CollectionDetailScreen` (kèm `tapped_collection_id`) |
 | Có nội dung | Text item + progress `x/y` (nếu bật) | **Cycle item tiếp theo** (broadcast `com.quotewidget.WIDGET_TAP`) |
-| **Free + widget thứ 2** | Placeholder **"Upgrade to Pro / to add more widgets"** (nền xám) | Mở app (mua/khóa Pro) |
+| **Free + widget thứ 2** (chưa cấu hình) | Placeholder **"Upgrade to Pro / to add more widgets"** (nền xám) | Mở app → paywall sheet (`route=paywall`, A-5) |
+| **Pro 24h hết hạn + widget thứ 2** (đã cấu hình) | **"24h Pass Expired — Tap to renew"** (nền xám, plan5 §1.6) | Mở app → paywall sheet gia hạn |
+
+**Graceful Pro-expiry (§1.6):** khi pass 24h hết hạn, widget thứ 2 KHÔNG biến mất/giữ content cũ vô thời hạn — `isExpiredLocked()` (widget cấu hình vượt free-limit 1, không phải widget cũ nhất) → render prompt gia hạn; widget cũ nhất (free slot) vẫn chạy bình thường. Check nằm trong `updateAppWidget()` nên **mọi** render path tôn trọng lock; tap content cũ sau expiry tự chuyển sang prompt. Vì `updatePeriodMillis=0` (không có system refresh), `WidgetService.syncProStatus` (chạy lúc startup) push `HomeWidget.updateWidget` sau khi ghi `is_pro` → lock tự áp dụng ngay lần mở app kế tiếp, không cần chờ tap/reboot.
 
 **Rotation khi tap:** `rotationMode` = `sequential` (next +1, wrap) hoặc `random` (không trùng item hiện tại) — logic trong Kotlin (`handleTap`) và `RotationService` (Dart).
 
@@ -61,7 +64,9 @@
 - **`HomeWidgetPreferences`** — widget data qua `HomeWidget.saveWidgetData()` (keys `widget_<id>_*`: text, theme, fontSize, currentIndex…). Kotlin đọc file này trước.
 - **`FlutterSharedPreferences`** — supplementary: `is_pro`, `is_pro_expires_at`, `configured_widget_ids` (Kotlin ghi cả key thường + `flutter.` prefix). Không dùng default prefs (từng gây bug critical).
 
-**Native lifecycle:** `onUpdate` (render + enforce limit), `onAppWidgetOptionsChanged` (re-render khi resize), `onDeleted` (dọn prefs 2 file + cập nhật `configured_widget_ids`), `onReceive` (xử lý tap). `WidgetReceiver` (BroadcastReceiver) chuyển tiếp tap.
+**Native lifecycle:** `onUpdate` (render + enforce limit + `migratePreferencesIfNeeded`), `onAppWidgetOptionsChanged` (re-render khi resize), `onDeleted` (dọn prefs 2 file + `wcfg_*` mapping cả 2 chiều + cập nhật `configured_widget_ids`), `onReceive` (xử lý tap). `WidgetReceiver` (BroadcastReceiver) chuyển tiếp tap.
+
+**Registry consistency (Sprint A, plan4):** free-limit gate đọc NATIVE `configured_widget_ids` qua MethodChannel `quotewidget/widgets` (không tin Hive box — tránh dead-end trap); app start/resume chạy `reconcileWidgetConfigs()` hybrid (so count, lệch mới quét full xoá orphaned config + mapping).
 
 ---
 
@@ -106,8 +111,9 @@
 ## 7. Share từ app khác (Task 2)
 
 - `ShareReceiverActivity` nhận `ACTION_SEND text/plain` → ghi `flutter.pending_share_text` + `flutter.share_timestamp` vào **đúng file `FlutterSharedPreferences`** (key prefix `flutter.`) bằng `.commit()` đồng bộ → `finish()` **không mở app UI** (translucent theme, noHistory, excludeFromRecents → không flash).
-- `main.dart` `_handlePendingShare()` khi mở app: 0 collection → toast nhắc tạo; **1 collection → auto-save + toast "Saved to <name>" + refresh widget**; nhiều collection → dialog picker (kèm tạo mới).
-- Toast native (channel `quotewidget/toast` trong `MainActivity`) — hiển thị cả khi app UI không trên màn hình.
+- `main.dart` `_handlePendingShare()` khi mở app: 0 collection → toast nhắc tạo; **1 collection → auto-save + refresh widget + SnackBar "Saved to <name>" có nút Undo (10s)**; nhiều collection → dialog picker (kèm tạo mới) rồi cùng SnackBar+Undo.
+- **Quick Share Undo (§1.7):** `ShareService.saveToCollection` trả đúng `Item` vừa tạo (Undo target chính xác, không đoán). Tap **Undo** trong ~10s → soft-delete item đó (về Trash — recoverable) + refresh widget collection → xác nhận "Share removed". UI nằm trong `lib/widgets/share_undo_snackbar.dart` (helper testable). SnackBar tự hết hạn — không Undo sau cửa sổ.
+- Toast native (channel `quotewidget/toast` trong `MainActivity`) chỉ còn cho các path không có gì để undo (fail / chưa có collection).
 
 ---
 
@@ -124,8 +130,10 @@
 ## 9. Deep link / cold start
 
 - **Tap widget chưa cấu hình** (cold start): Kotlin ghi `tapped_widget_id`/`tapped_collection_id` → `main.dart` mở thẳng `WidgetSetupScreen` làm root. **Edge case đã fix:** nếu screen này là root route, `_save()` không pop (black screen) mà `pushReplacement` Home.
-- **Warm start** (app đang chạy, tap widget): `MainActivity.onNewIntent` ghi prefs → `didChangeAppLifecycleState(resumed)` → `_checkPendingWidgetTap()` → push `WidgetSetupScreen`.
-- No formal router — Navigator 1.0 imperative, không có điểm chết nav (đã rà soát: BackupScreen có entry từ Settings, mọi screen có đường về).
+- **Tap "Upgrade to Pro" / "24h Pass Expired" trên widget** → launch intent kèm `route=paywall` → MainActivity persist `pending_route` (cả 2 file prefs) → Flutter đọc lúc cold-start (`showPaywallOnStart`) hoặc warm-start (`_checkPendingPaywallRoute` trên resume) → mở thẳng paywall bottom sheet (`lib/widgets/paywall_sheet.dart`, Watch Ad 24h / Cancel).
+- **Warm start** (app đang chạy, tap widget cấu hình): `MainActivity.onNewIntent` ghi prefs → `didChangeAppLifecycleState(resumed)` → `_checkPendingWidgetTap()` → push `WidgetSetupScreen`.
+- **Kèm reconciliation trên resume** (`didChangeAppLifecycleState`): widget có thể bị thêm/gỡ trên Home Screen lúc app ở nền → `reconcileWidgetConfigs()` chạy lại.
+- No formal router — Navigator 1.0 imperative; mọi `showDialog`/`SnackBar` từ app-level dùng `navigatorKey` context (context trên MaterialApp không có Navigator — từng là latent crash ở share multi-collection, đã fix).
 
 ---
 
@@ -141,10 +149,10 @@
 
 ---
 
-## 11. Test suite (75 tests)
+## 11. Test suite (93 tests)
 
-- `flutter test` → **84/84 pass**; `flutter analyze` → 0 errors, 0 warnings.
-- Phủ: storage (collections/items/widget-configs/trash/purge/limit), rotation service, IAP (time-bound Pro, permanent, Fix B widget-push), rewarded outcome gate (Fix A), interstitial frequency gate, backup import/export, curated themes consistency (id ↔ drawable ↔ native), widget limit, share, onboarding/sample data.
+- `flutter test` → **93/93 pass**; `flutter analyze` → 0 errors, 0 warnings.
+- Phủ: storage (collections/items/widget-configs/trash/purge/limit + A1 native-count gate + A2 reconciliation), rotation service, IAP (time-bound Pro, permanent, Fix B widget-push), rewarded outcome gate (Fix A), interstitial frequency gate, backup import/export, curated themes consistency (id ↔ drawable ↔ native), widget limit, **share service (§1.7 Undo target)**, **share-undo SnackBar UI (3 widget tests §1.7)**, **syncProStatus startup-push (§1.6, channel mock)**, paywall sheet (4), onboarding/sample data.
 - Mô phỏng: Hive `init(testPath:)`, SharedPreferences `setMockInitialValues`, MethodChannel mock (`home_widget`, toast).
 
 ---
@@ -155,4 +163,5 @@
 - **KHÔNG** tạo/đổi file SharedPreferences hay key Pro (rule critical).
 - **Dead code:** `widget_config_screen.dart` (unreachable) — không thêm feature.
 - **2026-09-04:** `in_app_purchase` đã gỡ khỏi pubspec (IAP removed) — chỉ còn rewarded-ad 24h. `proUnlockedUntil = DateTime(9999)` chỉ còn từ legacy migration (`iap_pro_purchased`).
-- TODO còn mở: đăng ký **rewarded ad unit ID thật** trong AdMob console trước khi tắt `TEST_ADS`; **bật GitHub Pages** trong repo settings (Settings → Pages → Source: GitHub Actions) để `privacy.html` deploy; device test thật (FAB không đè ad, paywall chỉ còn Watch Ad, rewarded flow, background share, theme render).
+- **2026-09-04 (plan5 Sprint 0):** §1.6 Graceful Pro-expiry + startup re-render push; §1.7 Quick Share Undo + fix latent crash share multi-collection. Sprint 1/2/3 chưa mở — gate cứng: pass device test §1.8 trước.
+- TODO còn mở: đăng ký **rewarded ad unit ID thật** trong AdMob console trước khi tắt `TEST_ADS`; **bật GitHub Pages** trong repo settings (Settings → Pages → Source: GitHub Actions) để `privacy.html` deploy; **device test thật (plan5 §1.8 gate, danh sách chi tiết trong `checklist.md`)** — FAB không đè ad, paywall chỉ còn Watch Ad, Pro hết hạn → widget 2 "24h Pass Expired" + widget 1 vẫn chạy, Quick Share Undo, rewarded flow, background share, theme render.

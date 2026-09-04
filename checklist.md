@@ -27,6 +27,8 @@
 - [x] **onDeleted() cleanup** — both wcfg ↔ id direction (Sprint A-3)
 - [x] **PREFS_VERSION + migratePreferences() skeleton** (Sprint A-4)
 - [x] **Deep-link Upgrade Prompt** → paywall bottom sheet (cold-start + resume) (Sprint A-5)
+- [x] **Graceful Pro-expiry on widget** — "24h Pass Expired — Tap to renew" → paywall deep link (plan5 §1.6) — `7eed09c`
+- [x] **Startup re-render push after expiry** — syncProStatus → HomeWidget.updateWidget (no system refresh, updatePeriodMillis=0) — `4d6ce76`
 
 ### Onboarding
 - [x] 2 flows (new user / import backup)
@@ -52,11 +54,10 @@
 ### Share
 - [x] ShareReceiverActivity (Android share sheet → save to collection)
 - [x] Pending share flow (single collection auto-save, multi-collection picker)
-- [x] **Quick Share Undo** — 10s "Saved to X" SnackBar + Undo action (soft-delete to Trash) (plan5 §1.7)
+- [x] **Quick Share Undo** — 10s "Saved to X" SnackBar + Undo action (soft-delete to Trash) (plan5 §1.7) — `7eed09c`
 
 ### Pro / Widget limits
-- [x] **Graceful Pro-expiry on widget** — "24h Pass Expired — Tap to renew" → paywall deep link (plan5 §1.6)
-- [x] Multi-collection share picker uses navigator-key context (fix latent above-MaterialApp crash)
+- [x] Multi-collection share picker uses navigator-key context (fix latent above-MaterialApp crash) — `7eed09c`
 
 ### Deep Link / Cold Start
 - [x] Unconfigured widget tap → WidgetSetupScreen
@@ -72,6 +73,13 @@
 - [x] `docs/privacy.html` — hosted on GitHub Pages
 - [x] `.github/workflows/pages.yml` — auto-deploy on push
 
+### Verification & Docs
+- [x] **93/93 tests pass** — storage 29 · trash 9 · rotation 11 · iap 7 · rewarded 3 · interstitial 6 · paywall 4 · curated themes 4 · widget_limit 11 · share_service 4 · quick_share_undo 3 · widget_service 2 · widget_test 1
+- [x] `flutter analyze` — 0 errors, 0 warnings
+- [x] CI green (debug + release APK): runs `33832808067` (Sprint A) · `33857086225` + `33858880548` (plan5 Sprint 0) — commits `54f5c7d` / `7eed09c` / `4d6ce76`
+- [x] plan5 Sprint 0 §1.1–§1.7 code DONE — openspec `changes/sprint0-completion/`
+- [x] `features.md` — full feature/UI inventory, synced to HEAD `4d6ce76`
+
 ---
 
 ## ❌ Not Done / Open TODOs
@@ -79,6 +87,7 @@
 ### Immediate
 - [ ] **Enable GitHub Pages** in repo Settings (manual: Settings → Pages → Source: GitHub Actions) — first push to main with `docs/` will trigger deploy
 - [ ] **Device test (plan5 §1.8 gate)** — real Android device(s), Samsung + Pixel/stock: xoá Collection đang gắn Widget A → thêm Widget B không bị kẹt "Upgrade to Pro"; `wcfg_*` sạch sau khi kéo widget khỏi Home Screen; force-stop + reboot vẫn render đúng; Pro 24h hết hạn khi app đóng hoàn toàn vẫn tự khoá (widget 2 → "24h Pass Expired — Tap to renew", widget 1 vẫn chạy); 2 widget rotation độc lập; Quick Share Undo (save + Undo trong 10s); FAB không đè ads; paywall chỉ Watch Ad; privacy link mở
+- [ ] plan5 Sprint 1/2/3 — NOT started (hard gate: pass device test §1.8 first)
 
 ### Monetization
 - [ ] **Register real rewarded ad unit ID** in AdMob console (current: Google sample test ID) — required before disabling `TEST_ADS`
