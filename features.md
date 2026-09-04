@@ -1,7 +1,7 @@
 # Features — Quote Widget ("Your Words")
 
 > Tài liệu đầy đủ tính năng + UI của app, đối chiếu trực tiếp với source code.
-> Cập nhật lần cuối: 2026-09-04 (HEAD `e1a39a7`, CI green debug + release).
+> Cập nhật lần cuối: 2026-09-04 (HEAD `6a01dd8`, CI green debug + release).
 
 **App:** Hiển thị nội dung cá nhân (quote, từ vựng, lời nhắc…) trên Home Screen widget Android.
 **Tech:** Flutter 3.47.1 / Dart 3.13.1 · Hive (local DB) · home_widget + Kotlin RemoteViews · Android only (minSdk 24, compileSdk/targetSdk 36).
@@ -23,7 +23,7 @@
 | 9 | **Settings** | `lib/screens/settings_screen.dart` | Xem chi tiết ở §5 |
 | 10 | **Recently Deleted** | `lib/screens/recently_deleted_screen.dart` | Trash: 2 section (Collections / Items), mỗi row có Restore (xanh) + Delete Forever (đỏ, có confirm), purge 30 ngày tự động |
 | 11 | **Backup & Restore** | `lib/screens/backup_screen.dart` | Export backup (JSON + share sheet), Import (Append / Overwrite — chọn trước khi import), Safety Snapshots (list, restore, giữ tối đa 3) |
-| 12 | **Widget Setup** | `lib/screens/widget_setup_screen.dart` | Màn hình cấu hình widget: chọn collection → "Set Up Widget". Là **điểm chặn widget limit**: Free user thêm widget thứ 2 → dialog "Widget Limit Reached" (Cancel / Remove Ads Forever / Watch Ad — Unlock 24h) |
+| 12 | **Widget Setup** | `lib/screens/widget_setup_screen.dart` | Màn hình cấu hình widget: chọn collection → "Set Up Widget". Là **điểm chặn widget limit**: Free user thêm widget thứ 2 → paywall bottom sheet (Watch Ad — Unlock 24h / Cancel) |
 | 13 | **Collection Picker** (dialog) | `lib/screens/collection_picker_dialog.dart` | Khi share text và có >1 collection: chọn đích lưu, kèm tùy chọn "Create New Collection" |
 | — | ~~Widget Config~~ | `lib/screens/widget_config_screen.dart` | **DEAD CODE** — không được import ở đâu (rule project: không thêm feature vào đây). `WidgetPreview` cũng chỉ dùng trong screen này |
 
@@ -75,13 +75,13 @@
 
 ## 5. Settings (chi tiết)
 
-1. **Pro status row** (động): `Free (1 Widget)` / `Pro unlocked — Xh left` (24h) / `Pro (Remove Ads Forever)` (vĩnh viễn). Tap khi free → xem rewarded ad unlock 24h.
-2. **Remove Ads Forever** — IAP one-time `com.quotewidget.pro`, Pro vĩnh viễn.
-3. **Recently Deleted** → màn hình trash.
-4. **Backup & Restore** → export/import/snapshots.
-5. **Restore Purchases** (yêu cầu store review) — restore qua `purchaseStream`.
-6. **Privacy Policy** — mở `https://hoangsoft90.github.io/QuoteWidget/privacy.html` (url_launcher, external).
-7. **About** — "Quote Widget – Your Words v1.0.0".
+1. **Pro status row** (động): `Free (1 Widget)` / `Pro unlocked — Xh left` (24h) / `Pro (Lifetime)` (legacy purchasers). Tap khi free → xem rewarded ad unlock 24h.
+2. **Recently Deleted** → màn hình trash.
+3. **Backup & Restore** → export/import/snapshots.
+4. **Privacy Policy** — mở `https://hoangsoft90.github.io/QuoteWidget/privacy.html` (url_launcher, external).
+5. **About** — "Quote Widget – Your Words v1.0.0".
+
+> **2026-09-04:** Toàn bộ tính năng purchase đã gỡ (Remove Ads Forever + Restore Purchases + dependency `in_app_purchase`). Monetization chỉ còn rewarded-ad 24h. Pro **không** ẩn ads nữa.
 
 ---
 
@@ -89,10 +89,9 @@
 
 | Nguồn | Vị trí | Chi tiết |
 |---|---|---|
-| **Rewarded ad** (chính) | Settings Pro row · dialog widget-limit | Xem hết ad → **Pro 24h** (time-bound, tự khóa lại sau hết hạn, cả khi app đóng — Kotlin check `is_pro_expires_at`). Grant chỉ báo thành công **sau khi persist xong** (Fix A) |
-| **IAP "Remove Ads Forever"** | Settings · dialog widget-limit | One-time purchase → `proUnlockedUntil = DateTime(9999)` |
-| **Banner** | Home đáy (free tier) | Anchored adaptive banner, có bottom inset tránh 3-button nav; Pro → ẩn |
-| **Interstitial** | Sau destructive actions | delete-forever (collection/item), overwrite import, restore snapshot — tần suất: **1 lần mỗi 5 action** + cooldown 5 phút, preload nền, fail im lặng |
+| **Rewarded ad** (duy nhất) | Settings Pro row · paywall sheet (widget-limit + deep-link) | Xem hết ad → **Pro 24h** (time-bound, tự khóa lại sau hết hạn, cả khi app đóng — Kotlin check `is_pro_expires_at`). Grant chỉ báo thành công **sau khi persist xong** (Fix A) |
+| **Banner** | Home đáy (`bottomNavigationBar`) | Anchored adaptive banner + bottom inset tránh 3-button nav; **luôn hiển thị kể cả Pro** (2026-09-04 — Pro không ẩn ads); Scaffold tự nâng FAB [+] lên khỏi ad (không đè nhau) |
+| **Interstitial** | Sau destructive actions | delete-forever (collection/item), overwrite import, restore snapshot — tần suất: **1 lần mỗi 5 action** + cooldown 5 phút, preload nền, fail im lặng. Không gate theo Pro |
 
 **Config (`AdConfig`):**
 - `ENABLE_ADS=true` (default) — tắt ads bằng `--dart-define=ENABLE_ADS=false`.
@@ -144,7 +143,7 @@
 
 ## 11. Test suite (75 tests)
 
-- `flutter test` → **75/75 pass**; `flutter analyze` → 0 errors, 0 warnings.
+- `flutter test` → **84/84 pass**; `flutter analyze` → 0 errors, 0 warnings.
 - Phủ: storage (collections/items/widget-configs/trash/purge/limit), rotation service, IAP (time-bound Pro, permanent, Fix B widget-push), rewarded outcome gate (Fix A), interstitial frequency gate, backup import/export, curated themes consistency (id ↔ drawable ↔ native), widget limit, share, onboarding/sample data.
 - Mô phỏng: Hive `init(testPath:)`, SharedPreferences `setMockInitialValues`, MethodChannel mock (`home_widget`, toast).
 
@@ -155,4 +154,5 @@
 - **KHÔNG** thêm: photo background, custom fonts, iOS widget, cloud sync (feature freeze — plan3).
 - **KHÔNG** tạo/đổi file SharedPreferences hay key Pro (rule critical).
 - **Dead code:** `widget_config_screen.dart` (unreachable) — không thêm feature.
-- TODO còn mở: đăng ký **rewarded ad unit ID thật** trong AdMob console trước khi tắt `TEST_ADS`; configure IAP product trong Play Console; device test thật (rewarded flow, background share, theme render).
+- **2026-09-04:** `in_app_purchase` đã gỡ khỏi pubspec (IAP removed) — chỉ còn rewarded-ad 24h. `proUnlockedUntil = DateTime(9999)` chỉ còn từ legacy migration (`iap_pro_purchased`).
+- TODO còn mở: đăng ký **rewarded ad unit ID thật** trong AdMob console trước khi tắt `TEST_ADS`; **bật GitHub Pages** trong repo settings (Settings → Pages → Source: GitHub Actions) để `privacy.html` deploy; device test thật (FAB không đè ad, paywall chỉ còn Watch Ad, rewarded flow, background share, theme render).
