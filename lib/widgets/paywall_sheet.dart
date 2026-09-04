@@ -7,20 +7,16 @@ enum PaywallResult {
   /// User watched the rewarded ad and Pro (24h) was granted.
   adGranted,
 
-  /// User bought Remove Ads Forever and Pro (permanent) was granted.
-  buyGranted,
-
   /// Dismissed / failed — Pro not granted.
   cancelled,
 }
 
-/// Shared paywall bottom sheet (plan4 Sprint A-5): Watch Ad (24h) / Buy Pro
-/// (forever) / Cancel. Used both by [WidgetSetupScreen]'s widget-limit dialog
-/// path and by the native "Upgrade to Pro" widget deep link (route=paywall),
-/// so there is exactly one paywall UI in the app.
+/// Shared paywall bottom sheet: Watch Ad (24h) / Cancel.
+/// Used by [WidgetSetupScreen]'s widget-limit path and by the native
+/// "Upgrade to Pro" widget deep link (route=paywall).
 ///
-/// Returns the [PaywallResult] so callers can react (e.g. retry a widget
-/// save after a successful unlock).
+/// Pro does NOT remove ads — it only unlocks unlimited widgets for 24h.
+/// Returns the [PaywallResult] so callers can react.
 Future<PaywallResult> showPaywallSheet(
   BuildContext context, {
   required IapService iapService,
@@ -44,7 +40,7 @@ Future<PaywallResult> showPaywallSheet(
           const Padding(
             padding: EdgeInsets.fromLTRB(24, 0, 24, 12),
             child: Text(
-              'Add more widgets and remove all ads.',
+              'Add unlimited widgets for 24 hours.',
               style: TextStyle(color: Colors.grey),
             ),
           ),
@@ -53,12 +49,6 @@ Future<PaywallResult> showPaywallSheet(
             title: const Text('Watch Ad — Unlock 24h'),
             subtitle: const Text('Free, lasts 24 hours'),
             onTap: () => Navigator.of(sheetContext).pop('ad'),
-          ),
-          ListTile(
-            leading: const Icon(Icons.workspace_premium_outlined),
-            title: const Text('Remove Ads Forever'),
-            subtitle: const Text('One-time purchase, lifetime Pro'),
-            onTap: () => Navigator.of(sheetContext).pop('buy'),
           ),
           const SizedBox(height: 8),
           ListTile(
@@ -76,34 +66,17 @@ Future<PaywallResult> showPaywallSheet(
   if (!context.mounted) return PaywallResult.cancelled;
 
   final messenger = ScaffoldMessenger.of(context);
-  switch (action) {
-    case 'ad':
-      final rewarded = await rewardedAdService.showRewardedAd();
-      if (rewarded && iapService.isPro) {
-        messenger.showSnackBar(
-          const SnackBar(content: Text('Pro unlocked for 24h!')),
-        );
-        return PaywallResult.adGranted;
-      }
+  if (action == 'ad') {
+    final rewarded = await rewardedAdService.showRewardedAd();
+    if (rewarded && iapService.isPro) {
       messenger.showSnackBar(
-        const SnackBar(content: Text('Ad not finished. Please try again.')),
+        const SnackBar(content: Text('Pro unlocked for 24h!')),
       );
-      return PaywallResult.cancelled;
-    case 'buy':
-      final started = await iapService.buyPro();
-      if (iapService.isPro) {
-        messenger.showSnackBar(
-          const SnackBar(content: Text('Pro unlocked forever!')),
-        );
-        return PaywallResult.buyGranted;
-      }
-      if (!started) {
-        messenger.showSnackBar(
-          const SnackBar(content: Text('Purchase unavailable right now.')),
-        );
-      }
-      return PaywallResult.cancelled;
-    default:
-      return PaywallResult.cancelled;
+      return PaywallResult.adGranted;
+    }
+    messenger.showSnackBar(
+      const SnackBar(content: Text('Ad not finished. Please try again.')),
+    );
   }
+  return PaywallResult.cancelled;
 }

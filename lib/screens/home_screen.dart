@@ -160,21 +160,14 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
-      body: Column(
-        children: [
-          Expanded(
-            child: _isLoading
-                ? const Center(child: CircularProgressIndicator())
-                : _collections.isEmpty
-                    ? _buildEmptyState()
-                    : _buildCollectionList(),
-          ),
-          // Banner ad at the bottom (free tier only; hidden for Pro). The
-          // widget itself adds the system bottom inset so it stays clear of
-          // the Android 3-button navigation bar.
-          BannerAdView(iapService: widget.iapService),
-        ],
-      ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : _collections.isEmpty
+              ? _buildEmptyState()
+              : _buildCollectionList(),
+      // Banner ad pinned below the body — the Scaffold lifts the FAB above
+      // it automatically so the [+] button never overlaps the ad.
+      bottomNavigationBar: const BannerAdView(),
       floatingActionButton: FloatingActionButton(
         onPressed: _showCreateCollectionDialog,
         child: const Icon(Icons.add),

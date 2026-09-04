@@ -201,8 +201,7 @@ class _WidgetSetupScreenState extends State<WidgetSetupScreen> {
       iapService: widget.iapService,
       rewardedAdService: widget.rewardedAdService,
     );
-    if (mounted && (result == PaywallResult.adGranted ||
-        result == PaywallResult.buyGranted)) {
+    if (mounted && result == PaywallResult.adGranted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Now add your widget.')),
       );

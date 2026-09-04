@@ -75,8 +75,8 @@ void main() {
     });
   });
 
-  group('Permanent Pro (legacy IAP / buy forever)', () {
-    test('permanent purchase (DateTime(9999)) isPro true', () {
+  group('Permanent Pro (legacy migration)', () {
+    test('DateTime(9999) expiry → isPro true + hoursRemaining clamps', () {
       final iap = IapService();
       iap.proUnlockedUntil = DateTime(9999);
       expect(iap.isPro, true, reason: 'Permanent owner is always Pro');

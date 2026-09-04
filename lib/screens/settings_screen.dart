@@ -35,33 +35,7 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  bool _isRestoring = false;
   bool _isWatchingAd = false;
-
-  Future<void> _restorePurchases() async {
-    setState(() => _isRestoring = true);
-    try {
-      final restored = await widget.iapService.restorePurchases();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(restored
-                ? 'Pro features restored successfully'
-                : 'No previous purchases found'),
-            backgroundColor: restored ? Colors.green : Colors.orange,
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Restore failed: $e')),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _isRestoring = false);
-    }
-  }
 
   Future<void> _watchAdToUnlock() async {
     if (_isWatchingAd) return;
@@ -84,20 +58,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  Future<void> _buyForever() async {
-    final started = await widget.iapService.buyPro();
-    if (mounted) {
-      setState(() {});
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(started
-              ? 'Opening store… complete the purchase to remove ads forever.'
-              : 'Purchase unavailable right now.'),
-        ),
-      );
-    }
-  }
-
   Future<void> _openPrivacyPolicy() async {
     // Hosted on GitHub Pages of the QuoteWidget repo — static, versioned in git.
     final url = Uri.parse(
@@ -116,7 +76,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       appBar: AppBar(title: const Text('Settings')),
       body: ListView(
         children: [
-          // Pro Status (time-bound model — Task 4)
+          // Pro Status — Watch ad to unlock Pro for 24h
           ListTile(
             leading: Icon(
               isPro ? Icons.star : Icons.star_border,
@@ -125,14 +85,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
             title: Text(
               isPro
                   ? (widget.iapService.proUnlockedUntil!.year >= 9999
-                      ? 'Pro (Remove Ads Forever)'
+                      ? 'Pro (Lifetime)'
                       : 'Pro unlocked — ${hoursLeft}h left')
                   : 'Free (1 Widget)',
             ),
             subtitle: Text(
               isPro
-                  ? 'All features unlocked'
-                  : 'Watch a short ad to unlock Pro for 24h, or remove ads forever.',
+                  ? 'Unlimited widgets — ads still active'
+                  : 'Watch a short ad to unlock Pro for 24h.',
             ),
             trailing: _isWatchingAd
                 ? const SizedBox(
@@ -144,17 +104,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onTap: isPro ? null : _watchAdToUnlock,
           ),
 
-          // Remove Ads Forever (secondary IAP path)
-          ListTile(
-            leading: const Icon(Icons.workspace_premium_outlined),
-            title: const Text('Remove Ads Forever'),
-            subtitle: const Text('One-time purchase — no ads, Pro forever'),
-            onTap: _buyForever,
-          ),
-
           const Divider(),
 
-          // Recently Deleted (Trash — Task 7)
+          // Recently Deleted (Trash)
           ListTile(
             leading: const Icon(Icons.delete_outline),
             title: const Text('Recently Deleted'),
@@ -195,23 +147,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
               );
             },
-          ),
-
-          const Divider(),
-
-          // Restore Purchases (required for Store review)
-          ListTile(
-            leading: const Icon(Icons.restore),
-            title: const Text('Restore Purchases'),
-            subtitle: const Text('Restore Pro features from a previous purchase'),
-            trailing: _isRestoring
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : null,
-            onTap: _isRestoring ? null : _restorePurchases,
           ),
 
           const Divider(),

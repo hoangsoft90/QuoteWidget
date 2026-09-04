@@ -5,8 +5,8 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 /// AdMob configuration.
 ///
 /// Ads: banner on the Home screen bottom + rare interstitial after
-/// destructive actions (delete-forever, overwrite restore) on the free tier;
-/// rewarded ads unlock Pro for 24h. Lifetime Pro removes ALL ads.
+/// destructive actions (delete-forever, overwrite restore);
+/// rewarded ads unlock Pro for 24h (widget limit only — ads stay on).
 ///
 /// The REAL AdMob app ID lives in AndroidManifest.xml (required there for the
 /// SDK to initialize) — this file only swaps ad UNIT ids.

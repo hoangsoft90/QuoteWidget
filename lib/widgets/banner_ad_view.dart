@@ -2,19 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 
 import '../services/ad_config.dart';
-import '../services/iap_service.dart';
 
-/// Anchored adaptive banner pinned to the bottom of the Home screen
-/// (free tier only; Pro removes ads). Renders nothing on web, in widget
-/// tests, while Pro, or while the ad is still loading — the layout never
-/// reserves space for ads.
+/// Anchored adaptive banner pinned to the bottom of the Home screen.
+/// Ads are always shown (Pro does NOT hide ads — user decision 2026-09-03).
+/// Renders nothing on web, in widget tests, or while the ad is still
+/// loading — the layout never reserves space for ads.
 ///
 /// Adds the system bottom inset below the banner so the ad is never hidden
 /// behind the Android 3-button navigation bar (edge-to-edge, targetSdk 36).
 class BannerAdView extends StatefulWidget {
-  final IapService iapService;
-
-  const BannerAdView({super.key, required this.iapService});
+  const BannerAdView({super.key});
 
   @override
   State<BannerAdView> createState() => _BannerAdViewState();
@@ -66,8 +63,8 @@ class _BannerAdViewState extends State<BannerAdView> {
 
   @override
   Widget build(BuildContext context) {
-    // Pro purchase (or unsupported platform / tests) hides the banner.
-    if (!AdConfig.supported || widget.iapService.isPro) {
+    // Unsupported platform / tests — never load ads.
+    if (!AdConfig.supported) {
       if (_banner != null) _disposeBanner();
       return const SizedBox.shrink();
     }
