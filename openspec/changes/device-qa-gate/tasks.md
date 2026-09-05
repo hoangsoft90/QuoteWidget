@@ -11,18 +11,18 @@
 
 ## 3. OpenSpec change scaffold
 - [x] `proposal.md` written
-- [ ] `tasks.md` written (this file)
+- [x] `tasks.md` written (this file)
 
 ## 4. CI: QA candidate build path (agent)
-- [ ] Add `workflow_dispatch` input `test_ads` (default `true`) to `.github/workflows/build-debug-apk.yml`
-- [ ] Release APK step: `flutter build apk --release --no-pub --dart-define=TEST_ADS=${{ inputs.test_ads }}`
-- [ ] Commit + push; trigger `workflow_dispatch` with `test_ads=false`
-- [ ] Verify run green; `release-apk` artifact present
-- [ ] PASS evidence: CI run URL + workflow diff
+- [x] Add `workflow_dispatch` input `test_ads` (default `true`) to `.github/workflows/build-debug-apk.yml`
+- [x] Release APK step: `flutter build apk --release --no-pub --dart-define=TEST_ADS=${{ inputs.test_ads || 'true' }}`
+- [x] Commit `dbd4481` + push; dispatch with `test_ads=false` → run 33972687792
+- [x] Verify run green; `release-apk` artifact present (30.6 MB)
+- [x] PASS evidence: run 33972687792 success + workflow diff
 
 ## 5. Run sheet (agent)
-- [ ] `.plan/device_qa_run_sheet.md` created: metadata + all MUST cases + SHOULD cases + tick boxes + triage hints + sign-off
-- [ ] Verdict line written (CLOSED_TESTING_OK only after human runs waves — provisional: PRE_QA)
+- [x] `.plan/device_qa_run_sheet.md` created: metadata + all MUST cases + SHOULD cases + tick boxes + triage hints + sign-off
+- [x] Verdict line written — unchecked until human runs waves
 
 ## 6. Human tester handoff
-- [ ] Output summary: build path/artifact, commit hash, TEST_ADS flag, verdict status, Wave 1 instructions for Device A
+- [x] Output summary: build path/artifact, commit hash, TEST_ADS flag, verdict status, Wave 1 instructions for Device A (delivered in chat)

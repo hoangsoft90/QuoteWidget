@@ -2,9 +2,26 @@
 
 ## Current Status
 
-**Phase:** Phase 1 (Production Correctness, prompt_phase0_to_release) — **107/107 tests pass**, analyze `--fatal-warnings` exit 0
-**Next:** push Phase 1 → CI green → **Phase 2A (Favorites, Search, Duplicate, Templates)**
-**Gate:** Phase 1 = 8/8 PASS (progress_notes.md) — device test vẫn là manual gate riêng trước Production (Phase 4)
+**Phase:** Phase 4 — Device QA Gate (prompt_device_qa.md) — **138/138 tests pass**, analyze 0 issues
+**Next:** human tester chạy Waves 1–6 trên Device A (stock) + B (Samsung/Xiaomi) theo `.plan/device_qa_run_sheet.md`
+**Gate:** QA candidate build `dbd4481` / run 33972687792 `TEST_ADS=false` = ✅ success — verdict CLOSED_TESTING_OK chỉ sau khi tester PASS hết MUST
+
+### [2026-09-05] prompt_device_qa — Phase 4 Device QA prep
+- **Preflight PASS:** analyze 0 issues; `flutter test` 138/138; `source/` gone;
+  `widget_config_screen.dart`/`widget_preview.dart` deleted, 0 references.
+- **CI:** `.github/workflows/build-debug-apk.yml` thêm `workflow_dispatch` input
+  `test_ads` (default true) → release APK step dùng
+  `--dart-define=TEST_ADS=${{ inputs.test_ads || 'true' }}`. Push build giữ test ads;
+  dispatch `test_ads=false` cho QA candidate production ads (C1/H1). Commit `dbd4481`.
+- **QA candidate build:** run 33972687792 = success — `release-apk` artifact 30.6 MB,
+  `TEST_ADS=false` (production unit IDs: banner .../1409128007, interstitial
+  .../1569899782, rewarded .../7613467914).
+- **Run sheet:** `.plan/device_qa_run_sheet.md` — metadata + đủ MUST A1–A6/B1–B3/C1–C4/
+  D1–D2/E1–E4/F1–F5 (F4 shuffle + F5 daily = MUST vì đã ship Phase 2B)/G1–G2/H1–H2 +
+  SHOULD I1–I5, tick boxes, triage hints per case, sign-off.
+- **Docs:** `.plan/features_final.md` sync — Phase 1–2B features đánh dấu shipped
+  (verified bằng grep code); deferred items ghi rõ không claim ảo.
+- **OpenSpec:** `openspec/changes/device-qa-gate/` (proposal + tasks, đã chốt task checkbox).
 
 ### [2026-09-05] prompt_phase0_to_release — Phase 1 Production Correctness
 - **P0-2 reconcile 2-way scan (fix P1 bug):** bỏ early-return "count == count →
