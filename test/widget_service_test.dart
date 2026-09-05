@@ -1,6 +1,10 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:quotewidget/models/widget_config_model.dart';
 import 'package:quotewidget/services/storage_service.dart';
 import 'package:quotewidget/services/widget_service.dart';
 
@@ -30,6 +34,114 @@ void main() {
         .setMockMethodCallHandler(channel, null));
     return calls;
   }
+
+  group('Phase 2A: favorites-only rotation pool', () {
+    late Directory tempDir;
+    late StorageService storage;
+
+    setUp(() async {
+      SharedPreferences.setMockInitialValues({});
+      tempDir = await Directory.systemTemp.createTemp('widget_svc_test_');
+      storage = StorageService();
+      await storage.init(testPath: tempDir.path);
+    });
+
+    tearDown(() async {
+      await storage.clearAll();
+      await tempDir.delete(recursive: true);
+    });
+
+    test('favoritesOnly writes ONLY favorite texts to the pool + totalItems',
+        () async {
+      final calls = mockHomeWidgetChannel();
+      final col = await storage.createCollection('Vocab');
+      final a = await storage.createItem(collectionId: col.id, text: 'A', order: 0);
+      await storage.createItem(collectionId: col.id, text: 'B', order: 1);
+      final c = await storage.createItem(collectionId: col.id, text: 'C', order: 2);
+      await storage.setItemFavorite(a.id, true);
+      await storage.setItemFavorite(c.id, true);
+
+      final config = await storage.createWidgetConfig(
+        collectionId: col.id,
+        contentFilter: ContentFilter.favoritesOnly,
+      );
+      final service = WidgetService(storage);
+      await service.syncWidgetData(config, appWidgetId: 7);
+
+      String? saved(String id) {
+        for (final call in calls) {
+          if (call.method == 'saveWidgetData' &&
+              (call.arguments as Map)['id'] == id) {
+            return (call.arguments as Map)['data'] as String?;
+          }
+        }
+        return null;
+      }
+
+      expect(saved('widget_7_totalItems'), '2',
+          reason: 'pool size = favorites count (2), not all items (3)');
+      final pool = jsonDecode(saved('widget_7_items')!) as List;
+      expect(pool, ['A', 'C'],
+          reason: 'ordered favorite texts only, in item order');
+      expect(saved('widget_7_contentFilter'), 'favoritesOnly');
+      expect(saved('widget_7_text'), 'A', reason: 'currentIndex 0 → first favorite');
+    });
+
+    test('contentFilter all writes the full ordered pool', () async {
+      final calls = mockHomeWidgetChannel();
+      final col = await storage.createCollection('Vocab');
+      await storage.createItem(collectionId: col.id, text: 'X', order: 0);
+      await storage.createItem(collectionId: col.id, text: 'Y', order: 1);
+
+      final config = await storage.createWidgetConfig(collectionId: col.id);
+      final service = WidgetService(storage);
+      await service.syncWidgetData(config, appWidgetId: 9);
+
+      String? saved(String id) {
+        for (final call in calls) {
+          if (call.method == 'saveWidgetData' &&
+              (call.arguments as Map)['id'] == id) {
+            return (call.arguments as Map)['data'] as String?;
+          }
+        }
+        return null;
+      }
+
+      expect(saved('widget_9_totalItems'), '2');
+      final pool = jsonDecode(saved('widget_9_items')!) as List;
+      expect(pool, ['X', 'Y']);
+      expect(saved('widget_9_contentFilter'), 'all');
+    });
+
+    test('favoritesOnly with zero favorites → empty pool + empty text',
+        () async {
+      final calls = mockHomeWidgetChannel();
+      final col = await storage.createCollection('Vocab');
+      await storage.createItem(collectionId: col.id, text: 'unstarred', order: 0);
+
+      final config = await storage.createWidgetConfig(
+        collectionId: col.id,
+        contentFilter: ContentFilter.favoritesOnly,
+      );
+      final service = WidgetService(storage);
+      await service.syncWidgetData(config, appWidgetId: 3);
+
+      String? saved(String id) {
+        for (final call in calls) {
+          if (call.method == 'saveWidgetData' &&
+              (call.arguments as Map)['id'] == id) {
+            return (call.arguments as Map)['data'] as String?;
+          }
+        }
+        return null;
+      }
+
+      expect(saved('widget_3_totalItems'), '0');
+      final pool = jsonDecode(saved('widget_3_items')!) as List;
+      expect(pool, isEmpty);
+      expect(saved('widget_3_text'), '');
+    });
+  });
 
   group('syncProStatus startup push (plan5 Sprint 0 §1.6)', () {
     test('expired Pro (isPro=false) writes state THEN pushes updateWidget',

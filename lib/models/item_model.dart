@@ -11,6 +11,10 @@ class Item extends HiveObject {
   bool isDeleted;
   DateTime? deletedAt;
 
+  /// Favorite flag (Phase 2A — Favorites feature, features_final §1.4).
+  /// Default false for Hive backward-compat (missing field → false).
+  bool favorite;
+
   Item({
     required this.id,
     required this.collectionId,
@@ -19,6 +23,7 @@ class Item extends HiveObject {
     required this.createdAt,
     this.isDeleted = false,
     this.deletedAt,
+    this.favorite = false,
   });
 
   factory Item.create({
@@ -53,6 +58,7 @@ class Item extends HiveObject {
       'createdAt': createdAt.toIso8601String(),
       'isDeleted': isDeleted,
       'deletedAt': deletedAt?.toIso8601String(),
+      'favorite': favorite,
     };
   }
 
@@ -67,6 +73,7 @@ class Item extends HiveObject {
       deletedAt: json['deletedAt'] != null
           ? DateTime.tryParse(json['deletedAt'] as String)
           : null,
+      favorite: json['favorite'] as bool? ?? false,
     );
   }
 }
@@ -90,12 +97,13 @@ class ItemAdapter extends TypeAdapter<Item> {
       createdAt: fields[4] as DateTime,
       isDeleted: fields[5] as bool? ?? false,
       deletedAt: fields[6] as DateTime?,
+      favorite: fields[7] as bool? ?? false,
     );
   }
 
   @override
   void write(BinaryWriter writer, Item obj) {
-    writer.writeByte(7); // number of fields
+    writer.writeByte(8); // number of fields
     writer.writeByte(0);
     writer.write(obj.id);
     writer.writeByte(1);
@@ -110,6 +118,8 @@ class ItemAdapter extends TypeAdapter<Item> {
     writer.write(obj.isDeleted);
     writer.writeByte(6);
     writer.write(obj.deletedAt);
+    writer.writeByte(7);
+    writer.write(obj.favorite);
   }
 
   @override

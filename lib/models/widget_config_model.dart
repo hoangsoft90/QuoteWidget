@@ -9,6 +9,10 @@ class WidgetConfig extends HiveObject {
   SizeCategory sizeCategory;
   bool showProgress;
 
+  /// Phase 2A — Favorites-only widget (features_final §1.4): when
+  /// [ContentFilter.favoritesOnly], rotation only draws from favorite items.
+  ContentFilter contentFilter;
+
   WidgetConfig({
     required this.id,
     required this.collectionId,
@@ -17,17 +21,20 @@ class WidgetConfig extends HiveObject {
     required this.appearance,
     this.sizeCategory = SizeCategory.small,
     this.showProgress = true,
+    this.contentFilter = ContentFilter.all,
   });
 
   factory WidgetConfig.create({
     required String collectionId,
     SizeCategory sizeCategory = SizeCategory.small,
+    ContentFilter contentFilter = ContentFilter.all,
   }) {
     return WidgetConfig(
       id: _generateId(),
       collectionId: collectionId,
       appearance: AppearanceConfig.create(),
       sizeCategory: sizeCategory,
+      contentFilter: contentFilter,
     );
   }
 
@@ -47,6 +54,7 @@ class WidgetConfig extends HiveObject {
       'appearance': appearance.toJson(),
       'sizeCategory': sizeCategory.name,
       'showProgress': showProgress,
+      'contentFilter': contentFilter.name,
     };
   }
 
@@ -65,6 +73,10 @@ class WidgetConfig extends HiveObject {
         orElse: () => SizeCategory.small,
       ),
       showProgress: json['showProgress'] as bool? ?? true,
+      contentFilter: ContentFilter.values.firstWhere(
+        (e) => e.name == json['contentFilter'],
+        orElse: () => ContentFilter.all,
+      ),
     );
   }
 }
@@ -133,6 +145,13 @@ enum RotationMode {
   random,
 }
 
+/// Phase 2A — content filter for widget rotation: all items, or favorites
+/// only (features_final §1.4 Favorites-only widget).
+enum ContentFilter {
+  all,
+  favoritesOnly,
+}
+
 enum SizeCategory {
   small,
   medium,
@@ -165,12 +184,13 @@ class WidgetConfigAdapter extends TypeAdapter<WidgetConfig> {
       appearance: fields[4] as AppearanceConfig,
       sizeCategory: fields[5] as SizeCategory,
       showProgress: fields[6] as bool? ?? true,
+      contentFilter: fields[7] as ContentFilter? ?? ContentFilter.all,
     );
   }
 
   @override
   void write(BinaryWriter writer, WidgetConfig obj) {
-    writer.writeByte(7); // number of fields
+    writer.writeByte(8); // number of fields
     writer.writeByte(0);
     writer.write(obj.id);
     writer.writeByte(1);
@@ -185,6 +205,8 @@ class WidgetConfigAdapter extends TypeAdapter<WidgetConfig> {
     writer.write(obj.sizeCategory);
     writer.writeByte(6);
     writer.write(obj.showProgress);
+    writer.writeByte(7);
+    writer.write(obj.contentFilter);
   }
 
   @override
@@ -265,6 +287,31 @@ class RotationModeAdapter extends TypeAdapter<RotationMode> {
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is RotationModeAdapter &&
+          runtimeType == other.runtimeType &&
+          typeId == other.typeId;
+}
+
+class ContentFilterAdapter extends TypeAdapter<ContentFilter> {
+  @override
+  final int typeId = 7;
+
+  @override
+  ContentFilter read(BinaryReader reader) {
+    return ContentFilter.values[reader.readByte()];
+  }
+
+  @override
+  void write(BinaryWriter writer, ContentFilter obj) {
+    writer.writeByte(obj.index);
+  }
+
+  @override
+  int get hashCode => typeId.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ContentFilterAdapter &&
           runtimeType == other.runtimeType &&
           typeId == other.typeId;
 }

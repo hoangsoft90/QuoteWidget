@@ -98,6 +98,7 @@ class StorageService {
       Hive.registerAdapter(RotationModeAdapter());
       Hive.registerAdapter(SizeCategoryAdapter());
       Hive.registerAdapter(TextAlignmentAdapter());
+      Hive.registerAdapter(ContentFilterAdapter());
       _adaptersRegistered = true;
     }
 
@@ -118,6 +119,47 @@ class StorageService {
     final collection = Collection.create(name: name);
     await _collectionsBox.put(collection.id, collection);
     return collection;
+  }
+
+  /// Duplicate a collection with all its items (Phase 2A — features_final
+  /// §1.4). New IDs everywhere; name becomes `name (Copy)` (or `name (Copy 2)`
+  /// if the plain copy name exists). Items are inserted in ONE batch putAll —
+  /// no per-item awaits, no jank on large collections.
+  Future<Collection> duplicateCollection(String sourceId) async {
+    final source = _collectionsBox.get(sourceId);
+    if (source == null || source.isDeleted) {
+      throw StateError('Source collection not found');
+    }
+
+    var copyName = '${source.name} (Copy)';
+    var suffix = 2;
+    final existingNames = _collectionsBox.values
+        .where((c) => !c.isDeleted)
+        .map((c) => c.name)
+        .toSet();
+    while (existingNames.contains(copyName)) {
+      copyName = '${source.name} (Copy ${suffix++})';
+    }
+
+    final copy = Collection.create(name: copyName);
+    final sourceItems = getItemsForCollection(sourceId);
+    // Item.create generates fresh ids; then carry over the favorite flag.
+    final copiedItems = sourceItems.map((item) {
+      final copyItem = Item.create(
+        collectionId: copy.id,
+        text: item.text,
+        order: item.order,
+      );
+      copyItem.favorite = item.favorite;
+      return copyItem;
+    }).toList();
+
+    // Batch insert both boxes in one map each — avoids N sequential awaits.
+    await _collectionsBox.put(copy.id, copy);
+    if (copiedItems.isNotEmpty) {
+      await _itemsBox.putAll({for (final i in copiedItems) i.id: i});
+    }
+    return copy;
   }
 
   /// Active (non-trashed) collections, newest first.
@@ -296,6 +338,34 @@ class StorageService {
     }
   }
 
+  /// Set/unset the favorite flag on an item (Phase 2A — Favorites).
+  Future<void> setItemFavorite(String id, bool favorite) async {
+    final item = _itemsBox.get(id);
+    if (item == null || item.isDeleted) return;
+    item.favorite = favorite;
+    await item.save();
+  }
+
+  /// Toggle the favorite flag, returns the new value.
+  Future<bool> toggleItemFavorite(String id) async {
+    final item = _itemsBox.get(id);
+    if (item == null || item.isDeleted) return false;
+    item.favorite = !item.favorite;
+    await item.save();
+    return item.favorite;
+  }
+
+  /// Favorite (non-trashed) items of a collection, by order.
+  /// Used by the Favorites-only filter in Collection Detail and by the
+  /// favorites-only widget content filter (features_final §1.4).
+  List<Item> getFavoriteItemsForCollection(String collectionId) {
+    return _itemsBox.values
+        .where((item) =>
+            item.collectionId == collectionId && !item.isDeleted && item.favorite)
+        .toList()
+      ..sort((a, b) => a.order.compareTo(b.order));
+  }
+
   /// Soft-delete an item (Trash). Data stays in Hive for restore / purge.
   Future<void> deleteItem(String id) async {
     final item = _itemsBox.get(id);
@@ -364,6 +434,7 @@ class StorageService {
   Future<WidgetConfig> createWidgetConfig({
     required String collectionId,
     SizeCategory sizeCategory = SizeCategory.small,
+    ContentFilter contentFilter = ContentFilter.all,
   }) async {
     // Free tier: max 1 widget. Pro: unlimited.
     if (!_isProActive && await _effectiveWidgetCount() >= 1) {
@@ -373,6 +444,7 @@ class StorageService {
     final config = WidgetConfig.create(
       collectionId: collectionId,
       sizeCategory: sizeCategory,
+      contentFilter: contentFilter,
     );
     await _widgetConfigsBox.put(config.id, config);
     return config;

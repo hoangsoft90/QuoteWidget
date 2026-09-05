@@ -114,6 +114,119 @@ void main() {
     });
   });
 
+  group('Phase 2A: Favorites', () {
+    test('new items default to favorite=false (Hive backward-compat)',
+        () async {
+      final col = await service.createCollection('Test');
+      final item = await service.createItem(
+          collectionId: col.id, text: 'A', order: 0);
+      expect(item.favorite, isFalse,
+          reason: 'default must be false so existing Hive data stays stable');
+    });
+
+    test('setItemFavorite persists the flag', () async {
+      final col = await service.createCollection('Test');
+      final item = await service.createItem(
+          collectionId: col.id, text: 'A', order: 0);
+
+      await service.setItemFavorite(item.id, true);
+      expect(service.getItem(item.id)!.favorite, isTrue);
+
+      await service.setItemFavorite(item.id, false);
+      expect(service.getItem(item.id)!.favorite, isFalse);
+    });
+
+    test('toggleItemFavorite flips and returns the new value', () async {
+      final col = await service.createCollection('Test');
+      final item = await service.createItem(
+          collectionId: col.id, text: 'A', order: 0);
+
+      expect(await service.toggleItemFavorite(item.id), isTrue);
+      expect(await service.toggleItemFavorite(item.id), isFalse);
+    });
+
+    test('getFavoriteItemsForCollection filters by flag, keeps order', () async {
+      final col = await service.createCollection('Test');
+      final a = await service.createItem(collectionId: col.id, text: 'A', order: 0);
+      await service.createItem(collectionId: col.id, text: 'B', order: 1);
+      final c = await service.createItem(collectionId: col.id, text: 'C', order: 2);
+      await service.setItemFavorite(a.id, true);
+      await service.setItemFavorite(c.id, true);
+
+      final favs = service.getFavoriteItemsForCollection(col.id);
+      expect(favs.map((e) => e.text).toList(), ['A', 'C'],
+          reason: 'favorites only, original order');
+      expect(service.getItemsForCollection(col.id).length, 3,
+          reason: 'All filter still shows everything');
+    });
+
+    test('favorites exclude trashed items', () async {
+      final col = await service.createCollection('Test');
+      final a = await service.createItem(collectionId: col.id, text: 'A', order: 0);
+      await service.setItemFavorite(a.id, true);
+      await service.deleteItem(a.id);
+
+      expect(service.getFavoriteItemsForCollection(col.id), isEmpty,
+          reason: 'trashed favorites must not appear');
+    });
+
+    test('favorite flag survives JSON round-trip (backup/restore)', () async {
+      final col = await service.createCollection('Test');
+      final item = await service.createItem(collectionId: col.id, text: 'A', order: 0);
+      await service.setItemFavorite(item.id, true);
+
+      final json = item.toJson();
+      final restored = Item.fromJson(json);
+      expect(restored.favorite, isTrue);
+    });
+  });
+
+  group('Phase 2A: Duplicate Collection', () {
+    test('duplicates collection with fresh id and items, name "(Copy)"',
+        () async {
+      final src = await service.createCollection('Vocab');
+      final a = await service.createItem(collectionId: src.id, text: 'A', order: 0);
+      await service.createItem(collectionId: src.id, text: 'B', order: 1);
+      await service.setItemFavorite(a.id, true);
+
+      final copy = await service.duplicateCollection(src.id);
+
+      expect(copy.id, isNot(src.id), reason: 'fresh collection id');
+      expect(copy.name, 'Vocab (Copy)');
+      final copiedItems = service.getItemsForCollection(copy.id);
+      expect(copiedItems.map((i) => i.text).toList(), ['A', 'B'],
+          reason: 'items copied in order');
+      expect(copiedItems.every((i) => i.id != a.id && i.id.isNotEmpty), isTrue,
+          reason: 'fresh item ids');
+      expect(copiedItems[0].favorite, isTrue,
+          reason: 'favorite flag carried over');
+      expect(service.getItemsForCollection(src.id).length, 2,
+          reason: 'source untouched');
+    });
+
+    test('name collision → "(Copy 2)" then "(Copy 3)"', () async {
+      final src = await service.createCollection('Vocab');
+      await service.duplicateCollection(src.id);
+      final second = await service.duplicateCollection(src.id);
+      final third = await service.duplicateCollection(src.id);
+      expect(second.name, 'Vocab (Copy 2)');
+      expect(third.name, 'Vocab (Copy 3)');
+    });
+
+    test('duplicating missing collection throws', () async {
+      await expectLater(
+        service.duplicateCollection('nope'),
+        throwsA(isA<StateError>()),
+      );
+    });
+
+    test('duplicate of empty collection has no items', () async {
+      final src = await service.createCollection('Empty');
+      final copy = await service.duplicateCollection(src.id);
+      expect(service.getItemsForCollection(copy.id), isEmpty);
+    });
+  });
+
   group('Bulk add', () {
     test('bulkAddItems creates multiple items with correct order', () async {
       final col = await service.createCollection('Test');
@@ -271,6 +384,37 @@ void main() {
       );
 
       expect(config.sizeCategory, SizeCategory.medium);
+    });
+
+    test('Phase 2A: createWidgetConfig persists contentFilter (favoritesOnly)',
+        () async {
+      final col = await service.createCollection('Test');
+      final config = await service.createWidgetConfig(
+        collectionId: col.id,
+        contentFilter: ContentFilter.favoritesOnly,
+      );
+
+      expect(config.contentFilter, ContentFilter.favoritesOnly);
+      final reloaded = service.getWidgetConfig(config.id);
+      expect(reloaded!.contentFilter, ContentFilter.favoritesOnly,
+          reason: 'Hive round-trip must preserve the filter');
+
+      // Default is all (delete the first config to stay under the free limit).
+      await service.deleteWidgetConfig(config.id);
+      final plain = await service.createWidgetConfig(
+        collectionId: col.id,
+        contentFilter: ContentFilter.all,
+      );
+      expect(plain.contentFilter, ContentFilter.all);
+    });
+
+    test('Phase 2A: WidgetConfig JSON round-trip keeps contentFilter', () async {
+      final config = WidgetConfig.create(
+        collectionId: 'c1',
+        contentFilter: ContentFilter.favoritesOnly,
+      );
+      final restored = WidgetConfig.fromJson(config.toJson());
+      expect(restored.contentFilter, ContentFilter.favoritesOnly);
     });
 
     test('updateWidgetConfig persists changes', () async {

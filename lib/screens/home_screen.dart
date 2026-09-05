@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/collection_model.dart';
 import '../services/backup_service.dart';
+import '../services/sample_data_service.dart';
 import '../services/snapshot_manager.dart';
 import '../services/storage_service.dart';
 import '../services/widget_service.dart';
@@ -131,6 +132,53 @@ class _HomeScreenState extends State<HomeScreen> {
     _loadCollections();
   }
 
+  /// Phase 2A — Templates + Empty-state (features_final §1.4): when Home has
+  /// zero collections, offer the 5 starter packs (reuses SampleDataService)
+  /// or "Start empty" (plain new collection).
+  Future<void> _createFromTemplate(SampleUseCase useCase) async {
+    try {
+      final collections =
+          await SampleDataService(widget.storageService)
+              .createSampleCollections(useCase);
+      if (!mounted) return;
+      final created = collections.isNotEmpty ? collections.first : null;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            created != null
+                ? 'Created "${created.name}"'
+                : 'Template created',
+          ),
+        ),
+      );
+      _loadCollections();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Template failed: $e')),
+      );
+    }
+  }
+
+  /// Phase 2A — Duplicate Collection: copies collection + items with fresh
+  /// ids, name `name (Copy)`. No widget configs are copied (a duplicated
+  /// widget would need a physical widget that doesn't exist).
+  Future<void> _duplicateCollection(String id) async {
+    try {
+      final copy = await widget.storageService.duplicateCollection(id);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Duplicated as "${copy.name}"')),
+      );
+      _loadCollections();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Duplicate failed: $e')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -176,32 +224,77 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildEmptyState() {
+    // Phase 2A — Templates: CTA starter packs (reuse onboarding sample data)
+    // or start empty with the FAB (+).
     return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.collections_bookmark_outlined,
-            size: 80,
-            color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.5),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'Create your first collection',
-            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
-                ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Tap + to get started',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
-                ),
-          ),
-        ],
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.collections_bookmark_outlined,
+              size: 72,
+              color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.5),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Start with a template',
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    color: Theme.of(context)
+                        .colorScheme
+                        .onSurface
+                        .withValues(alpha: 0.8),
+                  ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Pick a pack — you can edit everything later.',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Theme.of(context)
+                        .colorScheme
+                        .onSurface
+                        .withValues(alpha: 0.5),
+                  ),
+            ),
+            const SizedBox(height: 20),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              alignment: WrapAlignment.center,
+              children: SampleUseCase.values.map((useCase) {
+                return ActionChip(
+                  avatar: Icon(_iconFor(useCase), size: 18),
+                  label: Text(useCase.title),
+                  onPressed: () => _createFromTemplate(useCase),
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: 16),
+            TextButton.icon(
+              onPressed: _showCreateCollectionDialog,
+              icon: const Icon(Icons.create_new_folder_outlined),
+              label: const Text('Start empty'),
+            ),
+          ],
+        ),
       ),
     );
+  }
+
+  IconData _iconFor(SampleUseCase useCase) {
+    switch (useCase) {
+      case SampleUseCase.vocabulary:
+        return Icons.translate;
+      case SampleUseCase.motivation:
+        return Icons.auto_awesome;
+      case SampleUseCase.workFocus:
+        return Icons.work_outline;
+      case SampleUseCase.gym:
+        return Icons.fitness_center;
+      case SampleUseCase.personalQuotes:
+        return Icons.edit_note;
+    }
   }
 
   Widget _buildCollectionList() {
@@ -228,11 +321,18 @@ class _HomeScreenState extends State<HomeScreen> {
             subtitle: Text('$itemCount item${itemCount == 1 ? '' : 's'}'),
             trailing: PopupMenuButton<String>(
               onSelected: (value) {
-                if (value == 'delete') {
+                if (value == 'duplicate') {
+                  _duplicateCollection(collection.id);
+                } else if (value == 'delete') {
                   _showDeleteConfirmation(collection);
                 }
               },
               itemBuilder: (context) => [
+                // Phase 2A — Duplicate Collection (features_final §1.4).
+                const PopupMenuItem(
+                  value: 'duplicate',
+                  child: Text('Duplicate'),
+                ),
                 const PopupMenuItem(
                   value: 'delete',
                   child: Text('Delete'),

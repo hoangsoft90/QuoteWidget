@@ -1,5 +1,8 @@
+import 'dart:convert';
+
 import 'package:home_widget/home_widget.dart';
 import 'package:device_info_plus/device_info_plus.dart';
+import '../models/item_model.dart';
 import '../models/widget_config_model.dart';
 import 'storage_service.dart';
 import 'widget_data_bridge.dart';
@@ -13,11 +16,21 @@ class WidgetService {
   /// Uses WidgetDataBridge (shared prefs) so Kotlin can read it directly.
   /// The [appWidgetId] is the Android system widget instance ID.
   /// If not provided, looks up via the appWidgetId↔config mapping.
+  ///
+  /// Phase 2A — Favorites-only: when [WidgetConfig.contentFilter] is
+  /// [ContentFilter.favoritesOnly], the rotation pool is the collection's
+  /// favorite items only. The ordered TEXT POOL is written as a JSON list
+  /// (`widget_<id>_items`) so Kotlin's tap-to-cycle picks `pool[index]` and
+  /// actually changes the displayed text (fixes the single-`_text` bug where
+  /// tap only advanced the counter).
   Future<void> syncWidgetData(WidgetConfig config, {int? appWidgetId}) async {
     // Resolve appWidgetId from mapping if not provided
     final resolvedId = appWidgetId ?? await WidgetDataBridge.getAppWidgetIdForConfig(config.id) ?? 0;
 
-    final items = _storageService.getItemsForCollection(config.collectionId);
+    final allItems = _storageService.getItemsForCollection(config.collectionId);
+    final items = config.contentFilter == ContentFilter.favoritesOnly
+        ? allItems.where((i) => i.favorite).toList()
+        : allItems;
 
     String? text;
     if (items.isNotEmpty && config.currentIndex < items.length) {
@@ -30,6 +43,13 @@ class WidgetService {
     await HomeWidget.saveWidgetData('${prefix}_rotationMode', config.rotationMode.name);
     await HomeWidget.saveWidgetData('${prefix}_totalItems', items.length.toString());
     await HomeWidget.saveWidgetData('${prefix}_text', text ?? '');
+    // Phase 2A: ordered text pool for index-based native rotation. Flattened
+    // primitives (JSON list of strings) — allowed by plan 2B native-keys rule.
+    await HomeWidget.saveWidgetData(
+      '${prefix}_items',
+      jsonEncode(items.map((Item i) => i.text).toList()),
+    );
+    await HomeWidget.saveWidgetData('${prefix}_contentFilter', config.contentFilter.name);
     await HomeWidget.saveWidgetData('${prefix}_theme', config.appearance.theme);
     await HomeWidget.saveWidgetData('${prefix}_fontSize', config.appearance.fontSize.toString());
     await HomeWidget.saveWidgetData('${prefix}_textColor', config.appearance.textColor.toString());

@@ -93,6 +93,8 @@ class QuoteWidgetProvider : AppWidgetProvider() {
                 .remove("${prefix}_status")
                 .remove("${prefix}_totalItems")
                 .remove("${prefix}_rotationMode")
+                .remove("${prefix}_items")
+                .remove("${prefix}_contentFilter")
                 .remove("${prefix}_textColor")
                 .remove("${prefix}_backgroundColor")
                 .remove("${prefix}_fontSize")
@@ -104,6 +106,8 @@ class QuoteWidgetProvider : AppWidgetProvider() {
                 .remove("flutter.${prefix}_status")
                 .remove("flutter.${prefix}_totalItems")
                 .remove("flutter.${prefix}_rotationMode")
+                .remove("flutter.${prefix}_items")
+                .remove("flutter.${prefix}_contentFilter")
                 .remove("flutter.${prefix}_textColor")
                 .remove("flutter.${prefix}_backgroundColor")
                 .remove("flutter.${prefix}_fontSize")
@@ -204,14 +208,26 @@ class QuoteWidgetProvider : AppWidgetProvider() {
 
         // Read widget state (from FlutterSharedPreferences via helpers)
         val collectionId = getString(context, "${prefix}_collectionId")
-        val text = getString(context, "${prefix}_text")
         val status = getString(context, "${prefix}_status")
+        val currentIndex = getInt(context, "${prefix}_currentIndex", 0)
+        // Phase 2A: index-based rotation pool. Flutter writes the ordered
+        // item-text list as JSON; tap-to-cycle picks pool[currentIndex] so the
+        // displayed text actually changes (the old single `_text` key meant
+        // taps only advanced the counter — device QA F1 would fail). Falls
+        // back to the legacy single-text key when the pool is absent.
+        val items = parseTextPool(getString(context, "${prefix}_items"))
+        val contentFilter = getString(context, "${prefix}_contentFilter", "all")
+        val fallbackText = getString(context, "${prefix}_text")
+        val text = if (items.isNotEmpty() && currentIndex < items.size) {
+            items[currentIndex]
+        } else {
+            fallbackText
+        }
         val textColor = getInt(context, "${prefix}_textColor", 0xFF000000.toInt())
         val backgroundColor = getInt(context, "${prefix}_backgroundColor", 0xFFFFFFFF.toInt())
         val fontSize = getString(context, "${prefix}_fontSize", "14").toFloatOrNull() ?: 14f
         val sizeCategory = getString(context, "${prefix}_sizeCategory", "small")
         val showProgress = getBoolean(context, "${prefix}_showProgress", true)
-        val currentIndex = getInt(context, "${prefix}_currentIndex", 0)
         val totalItems = getInt(context, "${prefix}_totalItems", 0)
         val theme = getString(context, "${prefix}_theme", "light")
 
@@ -222,10 +238,16 @@ class QuoteWidgetProvider : AppWidgetProvider() {
             saveConfiguredWidgetId(context, appWidgetId)
         }
 
+        // Phase 2A: favorites-only widget with zero favorites → clear hint
+        // instead of the generic empty-collection copy.
+        val favoritesOnlyEmpty = contentFilter == "favoritesOnly" &&
+            items.isEmpty() && text.isEmpty()
+
         // Determine display text based on state
         val displayText = when {
             collectionId.isEmpty() -> "Tap to set up this widget"
             isRemoved -> "Collection removed. Tap to choose another."
+            favoritesOnlyEmpty -> "No favorites yet — star items in the app"
             text.isEmpty() -> "Add some content to this collection."
             else -> text
         }
@@ -501,6 +523,21 @@ class QuoteWidgetProvider : AppWidgetProvider() {
         val flValue = flPrefs.getString("flutter.$key", null)
         if (flValue != null) return flValue.toBoolean()
         return flPrefs.getBoolean(key, default)
+    }
+
+    /**
+     * Phase 2A: parse the ordered item-text pool (JSON array of strings)
+     * written by WidgetService.syncWidgetData. Malformed/empty input → empty
+     * list (callers fall back to the single `_text` key / empty-state copy).
+     */
+    private fun parseTextPool(json: String): List<String> {
+        if (json.isEmpty()) return emptyList()
+        return try {
+            val arr = org.json.JSONArray(json)
+            (0 until arr.length()).map { arr.getString(it) }
+        } catch (_: Exception) {
+            emptyList()
+        }
     }
 
     private fun getLong(context: Context, key: String, default: Long = 0L): Long {

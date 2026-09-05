@@ -27,15 +27,36 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
   WidgetConfig? _activeWidgetConfig;
   bool _isLoading = true;
 
+  /// Phase 2A — Favorites filter: false = All items, true = Favorites only.
+  bool _favoritesOnly = false;
+
+  /// Phase 2A — realtime search (features_final §1.4 Search). Empty = no filter.
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+  bool _searchActive = false;
+
   @override
   void initState() {
     super.initState();
     _loadItems();
   }
 
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
   void _loadItems() {
     setState(() {
-      _items = widget.storageService.getItemsForCollection(widget.collection.id);
+      final base = _favoritesOnly
+          ? widget.storageService.getFavoriteItemsForCollection(widget.collection.id)
+          : widget.storageService.getItemsForCollection(widget.collection.id);
+      // In-memory realtime search (case-insensitive substring on text).
+      final query = _searchQuery.trim().toLowerCase();
+      _items = query.isEmpty
+          ? base
+          : base.where((i) => i.text.toLowerCase().contains(query)).toList();
       // Get the first active widget config for this collection (for progress display)
       // If multiple widgets exist for this collection, we show progress of the first one.
       _activeWidgetConfig = widget.storageService.getAllWidgetConfigs()
@@ -43,6 +64,13 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
           .firstOrNull;
       _isLoading = false;
     });
+  }
+
+  void _setFavoritesOnly(bool value) {
+    setState(() {
+      _favoritesOnly = value;
+    });
+    _loadItems();
   }
 
   void _showAddItemDialog() {
@@ -202,6 +230,37 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
       appBar: AppBar(
         title: Text(widget.collection.name),
         actions: [
+          // Phase 2A — realtime search toggle (in-memory, no new deps).
+          if (_searchActive)
+            IconButton(
+              icon: const Icon(Icons.close),
+              tooltip: 'Close search',
+              onPressed: () {
+                _searchController.clear();
+                setState(() {
+                  _searchActive = false;
+                  _searchQuery = '';
+                });
+                _loadItems();
+              },
+            )
+          else
+            IconButton(
+              icon: const Icon(Icons.search),
+              tooltip: 'Search',
+              onPressed: () => setState(() => _searchActive = true),
+            ),
+          // Phase 2A — Favorites filter toggle (All / Favorites-only).
+          IconButton(
+            icon: Icon(
+              _favoritesOnly ? Icons.star : Icons.star_border,
+              color: _favoritesOnly
+                  ? Theme.of(context).colorScheme.primary
+                  : null,
+            ),
+            tooltip: _favoritesOnly ? 'Show all items' : 'Show favorites only',
+            onPressed: () => _setFavoritesOnly(!_favoritesOnly),
+          ),
           if (_items.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(right: 8),
@@ -231,11 +290,18 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
           ),
         ],
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : _items.isEmpty
-              ? _buildEmptyState()
-              : _buildItemList(),
+      body: Column(
+        children: [
+          if (_searchActive) _buildSearchBar(),
+          Expanded(
+            child: _isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : _items.isEmpty
+                    ? _buildEmptyState()
+                    : _buildItemList(),
+          ),
+        ],
+      ),
       floatingActionButton: FloatingActionButton(
         onPressed: _showAddItemDialog,
         child: const Icon(Icons.add),
@@ -243,26 +309,62 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
     );
   }
 
+  Widget _buildSearchBar() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      child: TextField(
+        controller: _searchController,
+        autofocus: true,
+        decoration: InputDecoration(
+          hintText: 'Search items…',
+          prefixIcon: const Icon(Icons.search),
+          isDense: true,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+        onChanged: (value) {
+          setState(() => _searchQuery = value);
+          _loadItems();
+        },
+      ),
+    );
+  }
+
   Widget _buildEmptyState() {
+    final isSearch = _searchQuery.trim().isNotEmpty;
+    final isFavoritesFilter = !isSearch &&
+        _favoritesOnly &&
+        widget.storageService.getItemsForCollection(widget.collection.id).isNotEmpty;
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Icon(
-            Icons.note_add_outlined,
+            isSearch
+                ? Icons.search_off
+                : (isFavoritesFilter ? Icons.star_border : Icons.note_add_outlined),
             size: 80,
             color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.5),
           ),
           const SizedBox(height: 16),
           Text(
-            'Add some content to this collection.',
+            isSearch
+                ? 'No items match your search.'
+                : (isFavoritesFilter
+                    ? 'No favorites yet.'
+                    : 'Add some content to this collection.'),
             style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                   color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
                 ),
           ),
           const SizedBox(height: 8),
           Text(
-            'Tap + to add your first item',
+            isSearch
+                ? 'Try a different keyword'
+                : (isFavoritesFilter
+                    ? 'Tap the star on an item to add it here'
+                    : 'Tap + to add your first item'),
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
                 ),
@@ -301,22 +403,42 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
             ),
-            trailing: PopupMenuButton<String>(
-              onSelected: (value) {
-                if (value == 'edit') {
-                  _showEditItemDialog(item);
-                } else if (value == 'delete') {
-                  _showDeleteItemConfirmation(item);
-                }
-              },
-              itemBuilder: (context) => [
-                const PopupMenuItem(
-                  value: 'edit',
-                  child: Text('Edit'),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Phase 2A — Favorites: tap the star to toggle.
+                IconButton(
+                  icon: Icon(
+                    item.favorite ? Icons.star : Icons.star_border,
+                    color: item.favorite
+                        ? Theme.of(context).colorScheme.primary
+                        : Colors.grey,
+                  ),
+                  tooltip: item.favorite ? 'Remove from favorites' : 'Add to favorites',
+                  onPressed: () async {
+                    await widget.storageService.toggleItemFavorite(item.id);
+                    _loadItems();
+                    _syncWidget();
+                  },
                 ),
-                const PopupMenuItem(
-                  value: 'delete',
-                  child: Text('Delete'),
+                PopupMenuButton<String>(
+                  onSelected: (value) {
+                    if (value == 'edit') {
+                      _showEditItemDialog(item);
+                    } else if (value == 'delete') {
+                      _showDeleteItemConfirmation(item);
+                    }
+                  },
+                  itemBuilder: (context) => [
+                    const PopupMenuItem(
+                      value: 'edit',
+                      child: Text('Edit'),
+                    ),
+                    const PopupMenuItem(
+                      value: 'delete',
+                      child: Text('Delete'),
+                    ),
+                  ],
                 ),
               ],
             ),

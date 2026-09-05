@@ -55,6 +55,10 @@ class _WidgetSetupScreenState extends State<WidgetSetupScreen> {
   Collection? _selectedCollection;
   bool _saving = false;
 
+  /// Phase 2A — Favorites-only widget (features_final §1.4). When enabled,
+  /// the widget's rotation pool is the collection's favorite items only.
+  bool _favoritesOnly = false;
+
   @override
   void initState() {
     super.initState();
@@ -82,6 +86,8 @@ class _WidgetSetupScreenState extends State<WidgetSetupScreen> {
     try {
       config = await widget.storageService.createWidgetConfig(
         collectionId: _selectedCollection!.id,
+        contentFilter:
+            _favoritesOnly ? ContentFilter.favoritesOnly : ContentFilter.all,
       );
     } on WidgetLimitReachedException {
       if (mounted) setState(() => _saving = false);
@@ -135,6 +141,8 @@ class _WidgetSetupScreenState extends State<WidgetSetupScreen> {
     try {
       config = await widget.storageService.createWidgetConfig(
         collectionId: _selectedCollection!.id,
+        contentFilter:
+            _favoritesOnly ? ContentFilter.favoritesOnly : ContentFilter.all,
       );
     } on WidgetLimitReachedException {
       if (mounted) setState(() => _saving = false);
@@ -266,7 +274,22 @@ class _WidgetSetupScreenState extends State<WidgetSetupScreen> {
           ? SafeArea(
               child: Padding(
                 padding: const EdgeInsets.all(16),
-                child: ElevatedButton(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Phase 2A — Favorites-only toggle.
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Favorites only'),
+                      subtitle: const Text(
+                        'Widget shows only starred items',
+                        style: TextStyle(fontSize: 12),
+                      ),
+                      value: _favoritesOnly,
+                      onChanged: (value) =>
+                          setState(() => _favoritesOnly = value),
+                    ),
+                    ElevatedButton(
                   onPressed: _selectedCollection != null && !_saving
                       ? _save
                       : null,
@@ -277,6 +300,8 @@ class _WidgetSetupScreenState extends State<WidgetSetupScreen> {
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : const Text('Set Up Widget'),
+                ),
+                  ],
                 ),
               ),
             )
