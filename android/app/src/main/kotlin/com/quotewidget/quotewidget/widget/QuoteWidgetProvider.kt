@@ -711,7 +711,9 @@ class QuoteWidgetProvider : AppWidgetProvider() {
 
         if (bag.isEmpty() || bagIndex >= bag.size) {
             // Fresh bag: all ids shuffled, avoid starting with the current item.
-            bag = (0 until totalItems).toMutableList().shuffled()
+            // (shuffled() returns a read-only List, so materialize as MutableList
+            // before the swap below.)
+            bag = (0 until totalItems).shuffled().toMutableList()
             if (bag.size > 1 && bag.first() == currentIndex) {
                 val swapIdx = 1 + (0 until bag.size - 1).random()
                 val tmp = bag[0]; bag[0] = bag[swapIdx]; bag[swapIdx] = tmp
