@@ -13,6 +13,12 @@ class WidgetConfig extends HiveObject {
   /// [ContentFilter.favoritesOnly], rotation only draws from favorite items.
   ContentFilter contentFilter;
 
+  /// Phase 2B — rotation schedule (features_final §3).
+  ScheduleMode schedule;
+
+  /// Phase 2B — what a tap on the widget does (features_final §3).
+  TapAction tapAction;
+
   WidgetConfig({
     required this.id,
     required this.collectionId,
@@ -22,12 +28,17 @@ class WidgetConfig extends HiveObject {
     this.sizeCategory = SizeCategory.small,
     this.showProgress = true,
     this.contentFilter = ContentFilter.all,
+    this.schedule = ScheduleMode.manual,
+    this.tapAction = TapAction.next,
   });
 
   factory WidgetConfig.create({
     required String collectionId,
     SizeCategory sizeCategory = SizeCategory.small,
     ContentFilter contentFilter = ContentFilter.all,
+    RotationMode rotationMode = RotationMode.sequential,
+    ScheduleMode schedule = ScheduleMode.manual,
+    TapAction tapAction = TapAction.next,
   }) {
     return WidgetConfig(
       id: _generateId(),
@@ -35,6 +46,9 @@ class WidgetConfig extends HiveObject {
       appearance: AppearanceConfig.create(),
       sizeCategory: sizeCategory,
       contentFilter: contentFilter,
+      rotationMode: rotationMode,
+      schedule: schedule,
+      tapAction: tapAction,
     );
   }
 
@@ -55,6 +69,8 @@ class WidgetConfig extends HiveObject {
       'sizeCategory': sizeCategory.name,
       'showProgress': showProgress,
       'contentFilter': contentFilter.name,
+      'schedule': schedule.name,
+      'tapAction': tapAction.name,
     };
   }
 
@@ -76,6 +92,14 @@ class WidgetConfig extends HiveObject {
       contentFilter: ContentFilter.values.firstWhere(
         (e) => e.name == json['contentFilter'],
         orElse: () => ContentFilter.all,
+      ),
+      schedule: ScheduleMode.values.firstWhere(
+        (e) => e.name == json['schedule'],
+        orElse: () => ScheduleMode.manual,
+      ),
+      tapAction: TapAction.values.firstWhere(
+        (e) => e.name == json['tapAction'],
+        orElse: () => TapAction.next,
       ),
     );
   }
@@ -143,6 +167,10 @@ class AppearanceConfig extends HiveObject {
 enum RotationMode {
   sequential,
   random,
+  /// Phase 2B — no-repeat until exhausted (features_final §2 Shuffle Bag):
+  /// each cycle shows every item exactly once in a random order, then a new
+  /// bag is drawn (never starting with the item just shown).
+  shuffleBag,
 }
 
 /// Phase 2A — content filter for widget rotation: all items, or favorites
@@ -152,9 +180,62 @@ enum ContentFilter {
   favoritesOnly,
 }
 
+/// Phase 2B — rotation schedule (features_final §3). Manual = change only on
+/// tap; daily = one item per local calendar day (snaps back after refresh);
+/// every_1h/3h/6h = auto-advance on a timer.
+enum ScheduleMode {
+  manual,
+  daily,
+  every1h,
+  every3h,
+  every6h,
+}
+
+/// Phase 2B — what a tap on the widget does (features_final §3).
+enum TapAction {
+  /// Cycle to the next item (default).
+  next,
+  /// Open the app at the bound collection.
+  openCollection,
+  /// Just open the app.
+  openApp,
+  /// Copy the current text to the clipboard (+ native toast).
+  copy,
+}
+
+/// Phase 2B — per-widget shuffle-bag state (features_final §2). Persisted in
+/// SharedPreferences as flat primitives: `shuffle_bag` (JSON ids),
+/// `shuffle_index`, `shuffle_source_fp`.
+class ShuffleBagState {
+  final List<String> bag;
+  final int index;
+  final String sourceFingerprint;
+
+  const ShuffleBagState({
+    required this.bag,
+    required this.index,
+    required this.sourceFingerprint,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'bag': bag,
+        'index': index,
+        'sourceFingerprint': sourceFingerprint,
+      };
+
+  factory ShuffleBagState.fromJson(Map<String, dynamic> json) => ShuffleBagState(
+        bag: (json['bag'] as List? ?? const []).cast<String>(),
+        index: json['index'] as int? ?? 0,
+        sourceFingerprint: json['sourceFingerprint'] as String? ?? '',
+      );
+}
+
 enum SizeCategory {
   small,
   medium,
+  /// Phase 2B — responsive 4×2 (features_final §1.4). One main content area
+  /// with more room; chosen by the widget's measured size on resize.
+  wide,
 }
 
 enum TextAlignment {
@@ -185,12 +266,14 @@ class WidgetConfigAdapter extends TypeAdapter<WidgetConfig> {
       sizeCategory: fields[5] as SizeCategory,
       showProgress: fields[6] as bool? ?? true,
       contentFilter: fields[7] as ContentFilter? ?? ContentFilter.all,
+      schedule: fields[8] as ScheduleMode? ?? ScheduleMode.manual,
+      tapAction: fields[9] as TapAction? ?? TapAction.next,
     );
   }
 
   @override
   void write(BinaryWriter writer, WidgetConfig obj) {
-    writer.writeByte(8); // number of fields
+    writer.writeByte(10); // number of fields
     writer.writeByte(0);
     writer.write(obj.id);
     writer.writeByte(1);
@@ -207,6 +290,10 @@ class WidgetConfigAdapter extends TypeAdapter<WidgetConfig> {
     writer.write(obj.showProgress);
     writer.writeByte(7);
     writer.write(obj.contentFilter);
+    writer.writeByte(8);
+    writer.write(obj.schedule);
+    writer.writeByte(9);
+    writer.write(obj.tapAction);
   }
 
   @override
@@ -287,6 +374,56 @@ class RotationModeAdapter extends TypeAdapter<RotationMode> {
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is RotationModeAdapter &&
+          runtimeType == other.runtimeType &&
+          typeId == other.typeId;
+}
+
+class ScheduleModeAdapter extends TypeAdapter<ScheduleMode> {
+  @override
+  final int typeId = 8;
+
+  @override
+  ScheduleMode read(BinaryReader reader) {
+    return ScheduleMode.values[reader.readByte()];
+  }
+
+  @override
+  void write(BinaryWriter writer, ScheduleMode obj) {
+    writer.writeByte(obj.index);
+  }
+
+  @override
+  int get hashCode => typeId.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ScheduleModeAdapter &&
+          runtimeType == other.runtimeType &&
+          typeId == other.typeId;
+}
+
+class TapActionAdapter extends TypeAdapter<TapAction> {
+  @override
+  final int typeId = 9;
+
+  @override
+  TapAction read(BinaryReader reader) {
+    return TapAction.values[reader.readByte()];
+  }
+
+  @override
+  void write(BinaryWriter writer, TapAction obj) {
+    writer.writeByte(obj.index);
+  }
+
+  @override
+  int get hashCode => typeId.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is TapActionAdapter &&
           runtimeType == other.runtimeType &&
           typeId == other.typeId;
 }

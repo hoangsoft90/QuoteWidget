@@ -99,6 +99,8 @@ class StorageService {
       Hive.registerAdapter(SizeCategoryAdapter());
       Hive.registerAdapter(TextAlignmentAdapter());
       Hive.registerAdapter(ContentFilterAdapter());
+      Hive.registerAdapter(ScheduleModeAdapter());
+      Hive.registerAdapter(TapActionAdapter());
       _adaptersRegistered = true;
     }
 
@@ -435,6 +437,9 @@ class StorageService {
     required String collectionId,
     SizeCategory sizeCategory = SizeCategory.small,
     ContentFilter contentFilter = ContentFilter.all,
+    RotationMode rotationMode = RotationMode.sequential,
+    ScheduleMode schedule = ScheduleMode.manual,
+    TapAction tapAction = TapAction.next,
   }) async {
     // Free tier: max 1 widget. Pro: unlimited.
     if (!_isProActive && await _effectiveWidgetCount() >= 1) {
@@ -445,6 +450,9 @@ class StorageService {
       collectionId: collectionId,
       sizeCategory: sizeCategory,
       contentFilter: contentFilter,
+      rotationMode: rotationMode,
+      schedule: schedule,
+      tapAction: tapAction,
     );
     await _widgetConfigsBox.put(config.id, config);
     return config;

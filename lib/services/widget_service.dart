@@ -1,9 +1,11 @@
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:home_widget/home_widget.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import '../models/item_model.dart';
 import '../models/widget_config_model.dart';
+import 'rotation_service.dart';
 import 'storage_service.dart';
 import 'widget_data_bridge.dart';
 
@@ -50,6 +52,43 @@ class WidgetService {
       jsonEncode(items.map((Item i) => i.text).toList()),
     );
     await HomeWidget.saveWidgetData('${prefix}_contentFilter', config.contentFilter.name);
+    // Phase 2B: schedule + tap action (features_final §3).
+    await HomeWidget.saveWidgetData('${prefix}_schedule', config.schedule.name);
+    await HomeWidget.saveWidgetData('${prefix}_tapAction', config.tapAction.name);
+    // Phase 2B: shuffle-bag + schedule state (features_final §2/§3). Native
+    // keys are flat primitives; the bag is the one allowed JSON list.
+    if (config.rotationMode == RotationMode.shuffleBag) {
+      await _syncShuffleBag(prefix, items, config.currentIndex);
+    }
+    if (config.schedule == ScheduleMode.every1h ||
+        config.schedule == ScheduleMode.every3h ||
+        config.schedule == ScheduleMode.every6h) {
+      final existing = await HomeWidget.getWidgetData<String>('${prefix}_next_rotation_at');
+      if (existing == null || existing.isEmpty) {
+        final next = RotationService()
+            .nextRotationAt(schedule: config.schedule, now: DateTime.now());
+        if (next != null) {
+          await HomeWidget.saveWidgetData('${prefix}_next_rotation_at', next.toString());
+        }
+      }
+    }
+    if (config.schedule == ScheduleMode.daily) {
+      final existing = await HomeWidget.getWidgetData<String>('${prefix}_daily_date');
+      if (existing == null || existing.isEmpty) {
+        // Pin today's item on first daily activation (features_final §3.1).
+        final today = RotationService().localDateKey(DateTime.now());
+        final itemIds = items.map((Item i) => i.id).toList();
+        final idx = RotationService().dailyIndexForToday(
+          itemIds: itemIds,
+          previousDailyId: null,
+        );
+        await HomeWidget.saveWidgetData('${prefix}_daily_date', today);
+        await HomeWidget.saveWidgetData('${prefix}_daily_index', idx.toString());
+        if (idx >= 0 && idx < items.length) {
+          await HomeWidget.saveWidgetData('${prefix}_currentIndex', idx.toString());
+        }
+      }
+    }
     await HomeWidget.saveWidgetData('${prefix}_theme', config.appearance.theme);
     await HomeWidget.saveWidgetData('${prefix}_fontSize', config.appearance.fontSize.toString());
     await HomeWidget.saveWidgetData('${prefix}_textColor', config.appearance.textColor.toString());
@@ -63,6 +102,42 @@ class WidgetService {
       name: 'QuoteWidgetProvider',
       androidName: 'QuoteWidgetProvider',
     );
+  }
+
+  /// Phase 2B: (re)build the persisted shuffle bag when the source changed
+  /// (features_final §2.4 invalidate-on-source-change) or no bag exists yet.
+  /// The bag stores POOL INDICES (not item ids) because Kotlin only has the
+  /// text pool — the fp below detects source changes so a stale index bag is
+  /// always rebuilt before native rotation uses it.
+  Future<void> _syncShuffleBag(String prefix, List<Item> items, int currentIndex) async {
+    final fp = _sourceFingerprint(items);
+    final previousFp = await HomeWidget.getWidgetData<String>('${prefix}_shuffle_source_fp');
+    final existingBag = await HomeWidget.getWidgetData<String>('${prefix}_shuffle_bag');
+    if (previousFp == fp && existingBag != null && existingBag.isNotEmpty) {
+      return; // Source unchanged — keep native progress (force-stop safe).
+    }
+
+    // Build a fresh index bag; avoid starting with the current item
+    // (features_final §2.3: new bag never starts with the item just shown).
+    final count = items.length;
+    var bag = List.generate(count, (i) => i)..shuffle(Random());
+    if (count > 1 && bag.isNotEmpty && bag.first == currentIndex) {
+      final swapIdx = 1 + Random().nextInt(count - 1);
+      final tmp = bag[0];
+      bag[0] = bag[swapIdx];
+      bag[swapIdx] = tmp;
+    }
+
+    await HomeWidget.saveWidgetData('${prefix}_shuffle_bag', jsonEncode(bag));
+    await HomeWidget.saveWidgetData('${prefix}_shuffle_index', '0');
+    await HomeWidget.saveWidgetData('${prefix}_shuffle_source_fp', fp);
+  }
+
+  /// Deterministic fingerprint of the source item ids — detects add/remove
+  /// so the bag invalidates (features_final §2.4).
+  String _sourceFingerprint(List<Item> items) {
+    final ids = items.map((i) => i.id).toList()..sort();
+    return ids.join('|');
   }
 
   /// Update widget after data change

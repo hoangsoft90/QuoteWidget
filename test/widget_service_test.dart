@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:quotewidget/models/widget_config_model.dart';
+import 'package:quotewidget/services/rotation_service.dart';
 import 'package:quotewidget/services/storage_service.dart';
 import 'package:quotewidget/services/widget_service.dart';
 
@@ -140,6 +141,79 @@ void main() {
       final pool = jsonDecode(saved('widget_3_items')!) as List;
       expect(pool, isEmpty);
       expect(saved('widget_3_text'), '');
+    });
+  });
+
+  group('Phase 2B: schedule + tap-action keys persisted', () {
+    late Directory tempDir;
+    late StorageService storage;
+
+    setUp(() async {
+      SharedPreferences.setMockInitialValues({});
+      tempDir = await Directory.systemTemp.createTemp('widget_svc_2b_');
+      storage = StorageService();
+      await storage.init(testPath: tempDir.path);
+    });
+
+    tearDown(() async {
+      await storage.clearAll();
+      await tempDir.delete(recursive: true);
+    });
+
+    test('sync writes schedule + tapAction for a configured widget', () async {
+      final calls = mockHomeWidgetChannel();
+      final col = await storage.createCollection('Vocab');
+      await storage.createItem(collectionId: col.id, text: 'X', order: 0);
+      final config = await storage.createWidgetConfig(
+        collectionId: col.id,
+        schedule: ScheduleMode.every3h,
+        tapAction: TapAction.openCollection,
+      );
+      final service = WidgetService(storage);
+      await service.syncWidgetData(config, appWidgetId: 5);
+
+      String? saved(String id) {
+        for (final call in calls) {
+          if (call.method == 'saveWidgetData' &&
+              (call.arguments as Map)['id'] == id) {
+            return (call.arguments as Map)['data'] as String?;
+          }
+        }
+        return null;
+      }
+
+      expect(saved('widget_5_schedule'), 'every3h');
+      expect(saved('widget_5_tapAction'), 'openCollection');
+      // Auto-rotate seeds next_rotation_at on first sync.
+      expect(saved('widget_5_next_rotation_at'), isNotNull);
+      expect(int.tryParse(saved('widget_5_next_rotation_at')!),
+          greaterThan(DateTime.now().millisecondsSinceEpoch));
+    });
+
+    test('daily schedule pins today + daily index on first sync', () async {
+      final calls = mockHomeWidgetChannel();
+      final col = await storage.createCollection('Vocab');
+      await storage.createItem(collectionId: col.id, text: 'X', order: 0);
+      final config = await storage.createWidgetConfig(
+        collectionId: col.id,
+        schedule: ScheduleMode.daily,
+      );
+      final service = WidgetService(storage);
+      await service.syncWidgetData(config, appWidgetId: 6);
+
+      String? saved(String id) {
+        for (final call in calls) {
+          if (call.method == 'saveWidgetData' &&
+              (call.arguments as Map)['id'] == id) {
+            return (call.arguments as Map)['data'] as String?;
+          }
+        }
+        return null;
+      }
+
+      final today = RotationService().localDateKey(DateTime.now());
+      expect(saved('widget_6_daily_date'), today);
+      expect(saved('widget_6_daily_index'), '0');
     });
   });
 

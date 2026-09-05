@@ -276,7 +276,7 @@ class _QuoteWidgetAppState extends State<QuoteWidgetApp> with WidgetsBindingObse
     );
   }
 
-  void _handlePendingShare() {
+  Future<void> _handlePendingShare() async {
     if (widget.pendingShareText != null && widget.pendingShareText!.isNotEmpty) {
       final shareService = ShareService(widget.storageService);
       final collections = widget.storageService.getAllCollections();
@@ -314,6 +314,13 @@ class _QuoteWidgetAppState extends State<QuoteWidgetApp> with WidgetsBindingObse
         );
       }
 
+      // plan6 H5: explicit share-target dialog instead of silent auto-save.
+      // Phase 2B: default = last-used collection (remembered per share),
+      // falling back to the most recent collection (newest-first).
+      // No 5s auto-save timer — the user decides on every share.
+      final prefs = await SharedPreferences.getInstance();
+      final lastCollectionId = prefs.getString('last_share_collection_id');
+
       Future<void> saveAndConfirm(String collectionId, String collectionName) async {
         final saved = await shareService.saveToCollection(
           text: widget.pendingShareText!,
@@ -323,15 +330,17 @@ class _QuoteWidgetAppState extends State<QuoteWidgetApp> with WidgetsBindingObse
           await ToastService.show('Failed to save');
           return;
         }
+        // Phase 2B: remember the chosen collection for the next share.
+        await prefs.setString('last_share_collection_id', collectionId);
         // Refresh any widget showing this collection so new content shows.
         await widget.widgetService.updateWidgetsForCollection(collectionId);
         confirmSaved(saved, collectionName, collectionId);
       }
 
-      // plan6 H5: explicit share-target dialog instead of silent auto-save.
-      // Default = most recent collection (getAllCollections is newest-first).
-      // No 5s auto-save timer — the user decides on every share.
-      final defaultCollection = collections.first;
+      final defaultCollection = collections.firstWhere(
+        (c) => c.id == lastCollectionId,
+        orElse: () => collections.first,
+      );
       if (navigatorContext == null || !navigatorContext.mounted) return;
       showShareTargetDialog(
         navigatorContext,

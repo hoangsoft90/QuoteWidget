@@ -59,6 +59,11 @@ class _WidgetSetupScreenState extends State<WidgetSetupScreen> {
   /// the widget's rotation pool is the collection's favorite items only.
   bool _favoritesOnly = false;
 
+  /// Phase 2B — rotation order / schedule / tap action (features_final §3).
+  RotationMode _rotationMode = RotationMode.sequential;
+  ScheduleMode _schedule = ScheduleMode.manual;
+  TapAction _tapAction = TapAction.next;
+
   @override
   void initState() {
     super.initState();
@@ -88,6 +93,9 @@ class _WidgetSetupScreenState extends State<WidgetSetupScreen> {
         collectionId: _selectedCollection!.id,
         contentFilter:
             _favoritesOnly ? ContentFilter.favoritesOnly : ContentFilter.all,
+        rotationMode: _rotationMode,
+        schedule: _schedule,
+        tapAction: _tapAction,
       );
     } on WidgetLimitReachedException {
       if (mounted) setState(() => _saving = false);
@@ -143,6 +151,9 @@ class _WidgetSetupScreenState extends State<WidgetSetupScreen> {
         collectionId: _selectedCollection!.id,
         contentFilter:
             _favoritesOnly ? ContentFilter.favoritesOnly : ContentFilter.all,
+        rotationMode: _rotationMode,
+        schedule: _schedule,
+        tapAction: _tapAction,
       );
     } on WidgetLimitReachedException {
       if (mounted) setState(() => _saving = false);
@@ -217,6 +228,27 @@ class _WidgetSetupScreenState extends State<WidgetSetupScreen> {
     }
   }
 
+  String _rotationLabel(RotationMode mode) => switch (mode) {
+        RotationMode.sequential => 'Sequential (in order)',
+        RotationMode.random => 'Random (no immediate repeat)',
+        RotationMode.shuffleBag => 'Shuffle (no repeats until done)',
+      };
+
+  String _scheduleLabel(ScheduleMode s) => switch (s) {
+        ScheduleMode.manual => 'Manual (tap to change)',
+        ScheduleMode.daily => 'Daily (one item per day)',
+        ScheduleMode.every1h => 'Auto — every hour',
+        ScheduleMode.every3h => 'Auto — every 3 hours',
+        ScheduleMode.every6h => 'Auto — every 6 hours',
+      };
+
+  String _tapActionLabel(TapAction a) => switch (a) {
+        TapAction.next => 'Next item',
+        TapAction.openCollection => 'Open collection',
+        TapAction.openApp => 'Open app',
+        TapAction.copy => 'Copy text',
+      };
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -289,6 +321,66 @@ class _WidgetSetupScreenState extends State<WidgetSetupScreen> {
                       onChanged: (value) =>
                           setState(() => _favoritesOnly = value),
                     ),
+                    // Phase 2B — rotation order.
+                    DropdownButtonFormField<RotationMode>(
+                      initialValue: _rotationMode,
+                      decoration: const InputDecoration(
+                        labelText: 'Rotation',
+                        isDense: true,
+                      ),
+                      items: [
+                        for (final mode in RotationMode.values)
+                          DropdownMenuItem(
+                            value: mode,
+                            child: Text(_rotationLabel(mode)),
+                          ),
+                      ],
+                      onChanged: (value) => setState(
+                          () => _rotationMode = value ?? RotationMode.sequential),
+                    ),
+                    const SizedBox(height: 8),
+                    // Phase 2B — schedule.
+                    DropdownButtonFormField<ScheduleMode>(
+                      initialValue: _schedule,
+                      decoration: const InputDecoration(
+                        labelText: 'Schedule',
+                        isDense: true,
+                      ),
+                      items: [
+                        for (final s in ScheduleMode.values)
+                          DropdownMenuItem(
+                            value: s,
+                            child: Text(_scheduleLabel(s)),
+                          ),
+                      ],
+                      onChanged: (value) => setState(
+                          () => _schedule = value ?? ScheduleMode.manual),
+                    ),
+                    const SizedBox(height: 8),
+                    // Phase 2B — tap action.
+                    DropdownButtonFormField<TapAction>(
+                      initialValue: _tapAction,
+                      decoration: const InputDecoration(
+                        labelText: 'Tap action',
+                        isDense: true,
+                      ),
+                      items: [
+                        for (final a in TapAction.values)
+                          DropdownMenuItem(
+                            value: a,
+                            child: Text(_tapActionLabel(a)),
+                          ),
+                      ],
+                      onChanged: (value) => setState(
+                          () => _tapAction = value ?? TapAction.next),
+                    ),
+                    if (_schedule != ScheduleMode.manual) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        'Auto-rotate may be delayed on some devices to save battery.',
+                        style: TextStyle(fontSize: 11, color: Colors.grey),
+                      ),
+                    ],
                     ElevatedButton(
                   onPressed: _selectedCollection != null && !_saving
                       ? _save

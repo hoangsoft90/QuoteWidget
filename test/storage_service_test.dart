@@ -417,6 +417,40 @@ void main() {
       expect(restored.contentFilter, ContentFilter.favoritesOnly);
     });
 
+    test('Phase 2B: WidgetConfig persists schedule + tapAction + shuffleBag',
+        () async {
+      final col = await service.createCollection('Test');
+      final config = await service.createWidgetConfig(
+        collectionId: col.id,
+        rotationMode: RotationMode.shuffleBag,
+        schedule: ScheduleMode.daily,
+        tapAction: TapAction.copy,
+      );
+
+      expect(config.rotationMode, RotationMode.shuffleBag);
+      expect(config.schedule, ScheduleMode.daily);
+      expect(config.tapAction, TapAction.copy);
+
+      final reloaded = service.getWidgetConfig(config.id);
+      expect(reloaded!.rotationMode, RotationMode.shuffleBag);
+      expect(reloaded.schedule, ScheduleMode.daily);
+      expect(reloaded.tapAction, TapAction.copy);
+
+      // JSON round-trip too (backup schema).
+      final restored = WidgetConfig.fromJson(reloaded.toJson());
+      expect(restored.rotationMode, RotationMode.shuffleBag);
+      expect(restored.schedule, ScheduleMode.daily);
+      expect(restored.tapAction, TapAction.copy);
+    });
+
+    test('Phase 2B: defaults are sequential/manual/next', () async {
+      final col = await service.createCollection('Test');
+      final config = await service.createWidgetConfig(collectionId: col.id);
+      expect(config.rotationMode, RotationMode.sequential);
+      expect(config.schedule, ScheduleMode.manual);
+      expect(config.tapAction, TapAction.next);
+    });
+
     test('updateWidgetConfig persists changes', () async {
       final col = await service.createCollection('Test');
       final config = await service.createWidgetConfig(collectionId: col.id);

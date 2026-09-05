@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.widget.RemoteViews
 import com.quotewidget.quotewidget.R
+import java.util.Calendar
 
 class QuoteWidgetProvider : AppWidgetProvider() {
 
@@ -74,6 +75,16 @@ class QuoteWidgetProvider : AppWidgetProvider() {
         newOptions: android.os.Bundle
     ) {
         super.onAppWidgetOptionsChanged(context, appWidgetManager, appWidgetId, newOptions)
+        // Phase 2B: responsive 4×2 — infer the layout from the measured size
+        // (minWidth in dp) and persist it so render always picks the right one.
+        val minWidth = newOptions.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH)
+        val sizeCategory = when {
+            minWidth >= 250 -> "wide"
+            minWidth >= 180 -> "medium"
+            else -> "small"
+        }
+        val hwPrefs = getPrefs(context)
+        hwPrefs.edit().putString("widget_${appWidgetId}_sizeCategory", sizeCategory).apply()
         updateAppWidget(context, appWidgetManager, appWidgetId)
     }
 
@@ -156,11 +167,28 @@ class QuoteWidgetProvider : AppWidgetProvider() {
         val currentIndex = getInt(context, "${prefix}_currentIndex", 0)
         val collectionId = getString(context, "${prefix}_collectionId")
         val rotationMode = getString(context, "${prefix}_rotationMode", "sequential")
+        val tapAction = getString(context, "${prefix}_tapAction", "next")
         val totalItems = getInt(context, "${prefix}_totalItems", 0)
 
         // Mark as configured if it has collection data
         if (collectionId.isNotEmpty()) {
             saveConfiguredWidgetId(context, widgetId)
+        }
+
+        // Phase 2B: non-next tap actions (features_final §3).
+        when (tapAction) {
+            "openCollection" -> {
+                launchApp(context, widgetId, collectionId)
+                return
+            }
+            "openApp" -> {
+                launchApp(context, widgetId, null)
+                return
+            }
+            "copy" -> {
+                copyCurrentText(context, widgetId)
+                return
+            }
         }
 
         if (totalItems <= 0 || collectionId.isEmpty()) {
@@ -176,6 +204,8 @@ class QuoteWidgetProvider : AppWidgetProvider() {
                 } while (next == currentIndex && totalItems > 1)
                 next
             }
+            // Phase 2B: no-repeat shuffle bag (features_final §2).
+            "shuffleBag" -> nextShuffleIndex(context, prefix, totalItems, currentIndex)
             else -> (currentIndex + 1) % totalItems
         }
 
@@ -183,15 +213,16 @@ class QuoteWidgetProvider : AppWidgetProvider() {
         val hwPrefs = getPrefs(context)
         hwPrefs.edit().putString("${prefix}_currentIndex", nextIndex.toString()).apply()
 
-        // Update widget display
+        // Update widget display — tap render (daily keeps the temporary item).
         val appWidgetManager = AppWidgetManager.getInstance(context)
-        updateAppWidget(context, appWidgetManager, widgetId)
+        updateAppWidget(context, appWidgetManager, widgetId, fromTap = true)
     }
 
     private fun updateAppWidget(
         context: Context,
         appWidgetManager: AppWidgetManager,
-        appWidgetId: Int
+        appWidgetId: Int,
+        fromTap: Boolean = false
     ) {
         // plan5 Sprint 0 §1.6: a configured widget beyond the Free slot shows
         // "24h Pass Expired — Tap to renew" once the 24h rewarded-ad pass ran
@@ -209,7 +240,10 @@ class QuoteWidgetProvider : AppWidgetProvider() {
         // Read widget state (from FlutterSharedPreferences via helpers)
         val collectionId = getString(context, "${prefix}_collectionId")
         val status = getString(context, "${prefix}_status")
-        val currentIndex = getInt(context, "${prefix}_currentIndex", 0)
+        // Phase 2B: apply schedule rules BEFORE reading the display index —
+        // daily snaps to the day's item (except right after a tap, which may
+        // temporarily browse within the day); every_Nh auto-advances when due.
+        val currentIndex = resolveScheduleIndex(context, prefix, fromTap)
         // Phase 2A: index-based rotation pool. Flutter writes the ordered
         // item-text list as JSON; tap-to-cycle picks pool[currentIndex] so the
         // displayed text actually changes (the old single `_text` key meant
@@ -257,11 +291,11 @@ class QuoteWidgetProvider : AppWidgetProvider() {
         // collection — the null check was unreachable (plan4 §6 cleanup).
         val displayTextColor = if (isRemoved) 0xFF888888.toInt() else textColor
 
-        // Choose layout based on size
-        val layoutResId = if (sizeCategory == "medium") {
-            R.layout.widget_medium
-        } else {
-            R.layout.widget_small
+        // Choose layout based on size (Phase 2B: wide = responsive 4×2)
+        val layoutResId = when (sizeCategory) {
+            "medium" -> R.layout.widget_medium
+            "wide" -> R.layout.widget_wide
+            else -> R.layout.widget_small
         }
 
         // Construct the RemoteViews object
@@ -523,6 +557,229 @@ class QuoteWidgetProvider : AppWidgetProvider() {
         val flValue = flPrefs.getString("flutter.$key", null)
         if (flValue != null) return flValue.toBoolean()
         return flPrefs.getBoolean(key, default)
+    }
+
+    /**
+     * Phase 2B: resolve the index to render, applying schedule rules
+     * (features_final §3). Writes any index change back to prefs so the next
+     * render sees the same state.
+     *
+     * - daily: if today != daily_date → pick the day's item (advance the
+     *   sequential pointer or draw from the shuffle bag) and pin it. If same
+     *   day and NOT a tap render → snap back to the pinned daily item
+     *   (taps may temporarily browse within the day).
+     * - every_1h/3h/6h: if now >= next_rotation_at → advance per rotation
+     *   mode and set the next timestamp.
+     * - manual: unchanged.
+     */
+    private fun resolveScheduleIndex(context: Context, prefix: String, fromTap: Boolean): Int {
+        val schedule = getString(context, "${prefix}_schedule", "manual")
+        val rotationMode = getString(context, "${prefix}_rotationMode", "sequential")
+        val totalItems = getInt(context, "${prefix}_totalItems", 0)
+        val currentIndex = getInt(context, "${prefix}_currentIndex", 0)
+        val hwPrefs = getPrefs(context)
+        val today = localDateKey()
+
+        when (schedule) {
+            "daily" -> {
+                val dailyDate = getString(context, "${prefix}_daily_date", "")
+                if (dailyDate != today) {
+                    // New day → pick the day's item (avoid yesterday's).
+                    val yesterday = getInt(context, "${prefix}_daily_index", -1)
+                    val next = nextForDaily(totalItems, rotationMode, yesterday, context, prefix, currentIndex)
+                    hwPrefs.edit()
+                        .putString("${prefix}_daily_date", today)
+                        .putString("${prefix}_daily_index", next.toString())
+                        .putString("${prefix}_currentIndex", next.toString())
+                        .apply()
+                    return next
+                }
+                if (!fromTap) {
+                    // Same day, system/app refresh → snap to the pinned item.
+                    val dailyIndex = getInt(context, "${prefix}_daily_index", currentIndex)
+                    if (dailyIndex != currentIndex) {
+                        hwPrefs.edit().putString("${prefix}_currentIndex", dailyIndex.toString()).apply()
+                    }
+                    return dailyIndex
+                }
+                // Same day + tap → keep the temporary item the user is browsing.
+                return currentIndex
+            }
+            "every1h", "every3h", "every6h" -> {
+                val nextAt = getLong(context, "${prefix}_next_rotation_at", 0L)
+                if (nextAt <= 0L || System.currentTimeMillis() >= nextAt) {
+                    val intervalMillis = when (schedule) {
+                        "every1h" -> 60L * 60 * 1000
+                        "every3h" -> 3L * 60 * 60 * 1000
+                        else -> 6L * 60 * 60 * 1000
+                    }
+                    val next = nextIndexForMode(totalItems, rotationMode, currentIndex, context, prefix)
+                    hwPrefs.edit()
+                        .putString("${prefix}_currentIndex", next.toString())
+                        .putString("${prefix}_next_rotation_at", (System.currentTimeMillis() + intervalMillis).toString())
+                        .apply()
+                    return next
+                }
+                return currentIndex
+            }
+            else -> return currentIndex
+        }
+    }
+
+    /** Next index for daily rotation: sequential +1, or bag/random avoiding repeat. */
+    private fun nextForDaily(
+        totalItems: Int,
+        rotationMode: String,
+        yesterday: Int,
+        context: Context,
+        prefix: String,
+        currentIndex: Int
+    ): Int {
+        if (totalItems <= 0) return 0
+        if (totalItems == 1) return 0
+        if (yesterday < 0 || yesterday >= totalItems) {
+            // First daily: don't repeat the currently displayed item.
+            return nextIndexForMode(totalItems, rotationMode, currentIndex, context, prefix)
+        }
+        return when (rotationMode) {
+            "shuffleBag" -> nextShuffleIndex(context, prefix, totalItems, yesterday)
+            "random" -> {
+                var next: Int
+                do {
+                    next = (0 until totalItems).random()
+                } while (next == yesterday)
+                next
+            }
+            else -> (yesterday + 1) % totalItems
+        }
+    }
+
+    /** Next index honoring the rotation mode (sequential / random / shuffle bag). */
+    private fun nextIndexForMode(
+        totalItems: Int,
+        rotationMode: String,
+        currentIndex: Int,
+        context: Context,
+        prefix: String
+    ): Int {
+        return when (rotationMode) {
+            "random" -> {
+                var next: Int
+                do {
+                    next = (0 until totalItems).random()
+                } while (next == currentIndex && totalItems > 1)
+                next
+            }
+            "shuffleBag" -> nextShuffleIndex(context, prefix, totalItems, currentIndex)
+            else -> (currentIndex + 1) % totalItems
+        }
+    }
+
+    /**
+     * Phase 2B: shuffle-bag step (features_final §2). Reads the persisted bag
+     * (JSON array of item ids) + index; advances; rebuilds a fresh shuffled
+     * bag when exhausted or missing. Persisted per widget so force-stop /
+     * reboot does NOT reset progress.
+     */
+    private fun nextShuffleIndex(
+        context: Context,
+        prefix: String,
+        totalItems: Int,
+        currentIndex: Int
+    ): Int {
+        if (totalItems <= 0) return 0
+        if (totalItems == 1) return 0
+
+        var bag = readShuffleBag(context, prefix)
+        var bagIndex = getInt(context, "${prefix}_shuffle_index", 0)
+
+        if (bag.isEmpty() || bagIndex >= bag.size) {
+            // Fresh bag: all ids shuffled, avoid starting with the current item.
+            bag = (0 until totalItems).toMutableList().shuffled()
+            if (bag.size > 1 && bag.first() == currentIndex) {
+                val swapIdx = 1 + (0 until bag.size - 1).random()
+                val tmp = bag[0]; bag[0] = bag[swapIdx]; bag[swapIdx] = tmp
+            }
+            bagIndex = 0
+            writeShuffleBag(context, prefix, bag, bagIndex + 1)
+            return bag[0]
+        }
+
+        val next = bag[bagIndex]
+        writeShuffleBag(context, prefix, bag, bagIndex + 1)
+        return next
+    }
+
+    /** Read the persisted shuffle bag (JSON array of pool indices). */
+    private fun readShuffleBag(context: Context, prefix: String): List<Int> {
+        val json = getString(context, "${prefix}_shuffle_bag")
+        if (json.isEmpty()) return emptyList()
+        return try {
+            val arr = org.json.JSONArray(json)
+            (0 until arr.length()).mapNotNull { arr.optInt(it, -1).takeIf { n -> n >= 0 } }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun writeShuffleBag(context: Context, prefix: String, bag: List<Int>, index: Int) {
+        val json = org.json.JSONArray(bag).toString()
+        val hwPrefs = getPrefs(context)
+        hwPrefs.edit()
+            .putString("${prefix}_shuffle_bag", json)
+            .putString("${prefix}_shuffle_index", index.toString())
+            .apply()
+    }
+
+    /**
+     * Phase 2B: launch the app, optionally deep-linking to a collection
+     * (tapAction openCollection / openApp). Mirrors the unconfigured-widget
+     * launch intent so cold-start deep-link handling picks it up.
+     */
+    private fun launchApp(context: Context, appWidgetId: Int, collectionId: String?) {
+        val configPrefs = getPrefs(context)
+        configPrefs.edit().putString("tapped_widget_id", appWidgetId.toString()).apply()
+        if (collectionId != null) {
+            configPrefs.edit().putString("tapped_collection_id", collectionId).apply()
+        } else {
+            configPrefs.edit().remove("tapped_collection_id").apply()
+        }
+
+        val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
+        if (launchIntent != null) {
+            launchIntent.putExtra("appWidgetId", appWidgetId)
+            if (collectionId != null) launchIntent.putExtra("collectionId", collectionId)
+            launchIntent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            context.startActivity(launchIntent)
+        }
+    }
+
+    /**
+     * Phase 2B: copy the currently displayed text to the clipboard and show a
+     * native toast (tapAction = copy).
+     */
+    private fun copyCurrentText(context: Context, appWidgetId: Int) {
+        val prefix = "widget_$appWidgetId"
+        val items = parseTextPool(getString(context, "${prefix}_items"))
+        val currentIndex = getInt(context, "${prefix}_currentIndex", 0)
+        val text = if (items.isNotEmpty() && currentIndex < items.size) {
+            items[currentIndex]
+        } else {
+            getString(context, "${prefix}_text")
+        }
+        if (text.isEmpty()) return
+
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+        clipboard?.setPrimaryClip(android.content.ClipData.newPlainText("quote", text))
+        android.widget.Toast.makeText(context, "Copied", android.widget.Toast.LENGTH_SHORT).show()
+    }
+
+    /** Local calendar date as `yyyy-MM-dd` (minSdk 24-safe — no java.time). */
+    private fun localDateKey(): String {
+        val cal = Calendar.getInstance()
+        val m = (cal.get(Calendar.MONTH) + 1).toString().padStart(2, '0')
+        val d = cal.get(Calendar.DAY_OF_MONTH).toString().padStart(2, '0')
+        return "${cal.get(Calendar.YEAR)}-$m-$d"
     }
 
     /**
