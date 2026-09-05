@@ -1,5 +1,14 @@
 # Operating Rules — Quote Widget
 
+## Canonical Source (Phase 1 P0-1)
+
+- Repo ROOT (`lib/`, `android/`, `test/`) is the ONLY source of truth.
+- The legacy `source/` tree was removed — do NOT recreate it, and never
+  develop in any `_archive_legacy_*` folder.
+- Canonical feature spec: `.plan/features_final.md` (wins over `features.md`).
+- No cloud, iOS, AI, photo background, custom font upload, notification,
+  Saved Presets in V1.
+
 ## Code Style
 
 - Flutter SDK ^3.33, Dart ^3.13.1
@@ -10,22 +19,36 @@
 
 ## Testing
 
-- Unit tests for services: `test/rotation_service_test.dart`, `test/storage_service_test.dart`
-- Widget limit tests: `test/widget_limit_test.dart`
-- All tests must pass before any commit
-- Run: `flutter test` (all 44 tests)
+- All tests must pass before any commit (`flutter test`)
+- Baseline: 105 tests (storage, rotation, trash, iap, ads, share, backup
+  rollback, widget limit, curated themes, paywall, quick-share undo)
+- Backup semantics (Phase 1 P0-3): restore NEVER re-inserts WidgetConfigs
+  from a backup file — collections + items only; physical widgets must be
+  set up again after restore
 
 ## Git
 
-- Branch: master
-- No commits yet (project in development)
-- Commit convention: not yet established
+- Branch: main (pushed to origin; CI builds on push)
+- Conventional commits: `feat|fix|docs|refactor(scope): summary`
+- Commit only after: `flutter analyze` 0 issues + full test suite PASS
 
 ## Build
 
-- `flutter build apk --release` for APK
+- NEVER build APKs locally — builds run on GitHub Actions only
+  (`.github/workflows/build-debug-apk.yml`: analyze --fatal-warnings, test,
+  debug APK, release APK smoke compile)
 - Android only (no iOS targets in scope for MVP)
-- minSdk=24, targetSdk=latest Flutter default
+- minSdk=24, targetSdk=36 (Google Play API-36 requirement from 2026-08-31)
+
+## Release runbook (Phase 1 P0-5)
+
+- Production build (real ads, real rewarded ID):
+  `flutter build appbundle --release --dart-define=TEST_ADS=false`
+- Dev / test builds keep the default `TEST_ADS=true` (sample ad units — never
+  risk AdMob account limits during development).
+- `ENABLE_ADS=false` ships an ad-free build (master switch).
+- No-fill UX: rewarded fail → "No ad available. Try again." dialog + retry
+  (never silent fail); interstitial cooldown 5 min; non-personalized requests.
 
 ## SharedPreferences Convention
 

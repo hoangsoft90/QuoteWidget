@@ -147,6 +147,55 @@ void main() {
         reason: 'Snapshot captured the OLD state → taken BEFORE clearAll');
   });
 
+  test('Phase1 P0-3: restore file WITH widgetConfigs creates NO phantom configs',
+      () async {
+    // V1 backup semantics: an old backup file may carry widgetConfigs, but
+    // importing it must NOT re-insert them into Hive — a restored config has
+    // no physical widget (phantom) and would block the Free limit.
+    final storage = StorageService();
+    await storage.init(testPath: '${tempDir.path}/hive3');
+
+    final newCol = Collection(
+      id: 'ph-col',
+      name: 'Content Only',
+      createdAt: DateTime(2026, 1, 1),
+    );
+    final newItem = Item(
+      id: 'ph-item-1',
+      collectionId: 'ph-col',
+      text: 'backed up item',
+      order: 0,
+      createdAt: DateTime(2026, 1, 1),
+    );
+    final phantomConfig = WidgetConfig(
+      id: 'phantom-config-1',
+      collectionId: 'ph-col',
+      appearance: AppearanceConfig.create(),
+    );
+    final backupFile = File('${tempDir.path}/backup-with-configs.json');
+    await backupFile.writeAsString(
+      jsonEncode(BackupData.create(
+        collections: [newCol],
+        items: [newItem],
+        widgetConfigs: [phantomConfig],
+      ).toJson()),
+    );
+
+    final snapshotManager = SnapshotManager();
+    final backupService = BackupService(storage, snapshotManager);
+    final result = await backupService.importBackup(
+        filePath: backupFile.path, overwrite: true);
+
+    expect(result.success, isTrue);
+    expect(storage.getAllCollections().length, 1);
+    expect(storage.getAllCollections().first.name, 'Content Only');
+    expect(storage.getAllItems().length, 1);
+    // The config from the file must NOT be re-inserted (no phantom).
+    expect(storage.getAllWidgetConfigs(), isEmpty,
+        reason: 'restore must never create phantom WidgetConfigs');
+    expect(result.widgetConfigsImported, 0);
+  });
+
   test('successful restore keeps no spurious snapshot data corruption',
       () async {
     final storage = _FailingRestoreStorage();

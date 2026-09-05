@@ -2,9 +2,32 @@
 
 ## Current Status
 
-**Phase:** plan6_final bugfix code-complete — **105/105 tests pass**, analyze `--fatal-warnings` exit 0
-**Next:** CI verify (push) → **device test (plan5 §1.8 + plan6 Device QA 10 mục)** (bắt buộc, gated trước Sprint 1)
-**Blocker:** Device test cần máy thật (không chạy được trong env này) — Sprint 1/2/3 chờ gate
+**Phase:** Phase 1 (Production Correctness, prompt_phase0_to_release) — **107/107 tests pass**, analyze `--fatal-warnings` exit 0
+**Next:** push Phase 1 → CI green → **Phase 2A (Favorites, Search, Duplicate, Templates)**
+**Gate:** Phase 1 = 8/8 PASS (progress_notes.md) — device test vẫn là manual gate riêng trước Production (Phase 4)
+
+### [2026-09-05] prompt_phase0_to_release — Phase 1 Production Correctness
+- **P0-2 reconcile 2-way scan (fix P1 bug):** bỏ early-return "count == count →
+  skip" — mapping gãy dù count bằng vẫn phải quét. `reconcileWidgetConfigs()` giờ
+  full scan 2 chiều mỗi khi native ids có sẵn: (1) Hive config không mapping → xóa
+  (phantom); mapping trỏ widget đã mất → xóa config + mapping 2 chiều; (2) native id
+  mapping trỏ config không còn → xóa mapping cũ; native chưa mapping → giữ.
+  Tests: thay "fast path" cũ bằng **"counts equal nhưng mapping gãy → cleanup vẫn
+  chạy"** + 2 case mới (unbound, stale-mapping) — storage_service_test.dart.
+- **P0-3 backup no-phantom:** export `widgetConfigs: []` (không đưa config active
+  vào backup); import DROP mọi widgetConfigs trong file (pass `const []` cho cả
+  restore + append) — không bao giờ tạo phantom Hive config. Backup screen copy
+  canonical: "Backup restores your collections and items. Home Screen widgets need
+  to be set up again.". Test: file CÓ widgetConfigs → restore → box rỗng
+  (restore_rollback_test.dart).
+- **P0-4 dead code:** xóa `processShareText()`/`_isUrlOnly()`/`getShareMessage()`/
+  `ShareResult` (không call site — share flow dùng `saveToCollection` trực tiếp)
+  + test chết. Fix comment `WidgetDataBridge` (sai tên file `quotewidget_widget_data`).
+- **P0-1/P0-5:** README rewrite (canonical = root, không `source/`); operating_rules:
+  release runbook `--dart-define=TEST_ADS=false` + canonical-source + test count.
+- **P0-6/P0-7 verify-only:** IAP rewarded-only sạch; onDeleted wcfg_* cleanup OK.
+- Tests: 105 → **107** (storage +2 net, restore_rollback +1, share_service −1).
+- Openspec: `openspec/changes/phase1-correctness/`.
 
 ### [2026-09-05] plan6_final — Sprint 0 Critical & High bugfix
 - **C1 (CRITICAL) — startup reconciliation fix:** `main.dart` block cũ so int

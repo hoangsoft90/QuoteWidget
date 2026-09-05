@@ -1,6 +1,7 @@
 # Features — Quote Widget ("Your Words")
 
 > Tài liệu đầy đủ tính năng + UI của app, đối chiếu trực tiếp với source code.
+> **Canonical feature spec: `.plan/features_final.md`** (thắng nếu lệch — Phase 1 P0-4).
 > Cập nhật lần cuối: 2026-09-05 (HEAD plan6-bugfix, CI green debug + release).
 
 **App:** Hiển thị nội dung cá nhân (quote, từ vựng, lời nhắc…) trên Home Screen widget Android.
@@ -66,7 +67,7 @@
 
 **Native lifecycle:** `onUpdate` (render + enforce limit + `migratePreferencesIfNeeded`), `onAppWidgetOptionsChanged` (re-render khi resize), `onDeleted` (dọn prefs 2 file + `wcfg_*` mapping cả 2 chiều + cập nhật `configured_widget_ids`), `onReceive` (xử lý tap). `WidgetReceiver` (BroadcastReceiver) chuyển tiếp tap.
 
-**Registry consistency (Sprint A, plan4):** free-limit gate đọc NATIVE `configured_widget_ids` qua MethodChannel `quotewidget/widgets` (không tin Hive box — tránh dead-end trap); app start/resume chạy `reconcileWidgetConfigs()` hybrid (so count, lệch mới quét full xoá orphaned config + mapping).
+**Registry consistency (Sprint A, plan4 + Phase 1 P0-2):** free-limit gate đọc NATIVE `configured_widget_ids` qua MethodChannel `quotewidget/widgets` (không tin Hive box — tránh dead-end trap). `reconcileWidgetConfigs()` chạy **full 2-way scan mỗi lần** native ids có sẵn (đã bỏ early-return "count == count → skip" — Phase 1 P0-2 fix lỗi P1 "count bằng nhau nhưng mapping gãy"): (1) Hive config không có `wcfg_*` mapping → xóa (phantom); mapping trỏ widget đã biến mất → xóa config + mapping cả 2 chiều; (2) native id có mapping trỏ config không còn trong Hive → xóa mapping cũ; native id chưa mapping → giữ nguyên ("Tap to set up").
 
 **Startup orphan-mapping cleanup (plan6 C1):** `main.dart` sau khi init đọc `configured_widget_ids` → với mỗi native id, resolve `wcfg_<id>_configId` qua `WidgetDataBridge.getConfigIdForWidget()` → nếu mapping tồn tại NHƯNG config tương ứng không còn trong Hive (collection đã bị xóa) → gọi `removeWidgetMapping()` dọn mapping cũ (2 chiều). Widget chưa có mapping = "Tap to set up" — không đụng tới. Chạy trong `Future.microtask` (không chặn frame đầu). Fix thay thế block so sánh int-vs-UUID luôn-false trước đó (bị `// ignore: unused_local_variable` che giấu).
 
@@ -123,8 +124,8 @@
 
 ## 8. Backup & Safety (Task 3)
 
-- **Export:** JSON `quotewidget-backup-<ts>.json` (format `quote-widget-backup`, schema v1) → share sheet.
-- **Import:** picker `.json` (giới hạn 20MB), validate format/schema/fields/dupes/refs; 2 chế độ:
+- **Export:** JSON `quotewidget-backup-<ts>.json` (format `quote-widget-backup`, schema v1) → share sheet. **Chỉ chứa Collections + Items — KHÔNG export WidgetConfig active** (field `widgetConfigs: []` — Phase 1 P0-3).
+- **Import:** picker `.json` (giới hạn 20MB), validate format/schema/fields/dupes/refs; **mọi `widgetConfigs` trong file bị bỏ qua — không bao giờ tạo phantom Hive config** (P0-3); 2 chế độ:
   - **Append** — thêm mới, bỏ qua ID trùng.
   - **Overwrite** — **tạo safety snapshot trước**, restore thay thế, rollback tự động nếu thất bại, trigger interstitial.
 - **Safety Snapshots:** tạo trước destructive ops (delete collection, overwrite import) + restore từng snapshot, giữ tối đa 3, tự xóa cũ.

@@ -258,14 +258,14 @@ class _BackupScreenState extends State<BackupScreen> {
             ),
           ),
 
-          // plan4 §6: restore semantics — WidgetConfig (Hive UUID) and
-          // appWidgetId (Android) are different ID spaces, so a restore never
-          // auto-re-attaches the physical Home Screen widgets.
+          // Phase 1 P0-3 (features_final §4): backups carry collections +
+          // items only — physical Home Screen widgets are device-bound and
+          // must be set up again after a restore. Clear canonical copy.
           const Padding(
             padding: EdgeInsets.only(top: 8),
             child: Text(
-              'Restore khôi phục Collections và cài đặt Widget. '
-              'Widget đã có trên Home Screen có thể cần cấu hình lại thủ công.',
+              'Backup restores your collections and items. '
+              'Home Screen widgets need to be set up again.',
               style: TextStyle(fontSize: 12, color: Colors.grey),
             ),
           ),

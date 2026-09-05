@@ -3,13 +3,18 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 /// Bridge between Flutter and Kotlin for widget SharedPreferences data.
 ///
-/// Both sides MUST use the same file and key format:
-///   File: "quotewidget_widget_data"
-///   Keys: "widget_${appWidgetId}_${fieldName}"
+/// This class reads/writes the **FlutterSharedPreferences** file — the file
+/// the shared_preferences plugin uses — via [SharedPreferences.getInstance()]
+/// (Android adds the "flutter." prefix on disk; Dart sees unprefixed keys).
+/// It is NOT the widget display-data file: that data is written by
+/// WidgetService through HomeWidget.saveWidgetData → "HomeWidgetPreferences"
+/// (Kotlin reads both; see QuoteWidgetProvider.getPrefs/getFlutterPrefs).
 ///
-/// This replaces the home_widget plugin's data storage for widget state,
-/// because home_widget writes to its own SharedPreferences file which
-/// Kotlin cannot reliably read.
+/// Key conventions (MUST match Kotlin):
+///   widget data (display):     "widget_${appWidgetId}_${fieldName}"  (HomeWidgetPreferences)
+///   supplementary (this file):  "widget_${appWidgetId}_${fieldName}"  (FlutterSharedPreferences)
+///   is_pro / is_pro_expires_at (FlutterSharedPreferences)
+///   wcfg_ mapping:              "wcfg_${appWidgetId}_configId" ↔ "wcfg_${configId}_appWidgetId"
 class WidgetDataBridge {
   static const String _proStatusKey = 'is_pro';
 

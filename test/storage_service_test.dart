@@ -371,7 +371,13 @@ void main() {
           reason: 'config→appWidgetId mapping must be cleaned');
     });
 
-    test('fast path: counts match → no cleanup even with different ids', () async {
+    test('Phase1 P0-2: counts EQUAL but mapping broken → cleanup still runs',
+        () async {
+      // plan phase0_checklist P0-2: the old "count == count → fast path"
+      // skip silently hid broken mappings. Hive has 1 config, native has 1
+      // widget, but they are DIFFERENT ids (the config's mapping points at
+      // 1001 while the native registry only has 2002) → the orphaned config
+      // must be cleaned even though counts match.
       SharedPreferences.setMockInitialValues({});
       final service = StorageService();
       await service.init(testPath: tempDir.path);
@@ -383,13 +389,60 @@ void main() {
         configId: config.id,
       );
 
-      // Native count (1) == Hive count (1) → fast path, no full scan.
+      // Hive 1 == native 1 — pre-fix this would early-return and keep the
+      // orphan. Now the full 2-way scan must delete it.
       service.setWidgetIdsProvider(() async => [2002]);
 
       await service.reconcileWidgetConfigs();
 
-      expect(service.getAllWidgetConfigs().length, 1,
-          reason: 'Counts equal → fast path must not scan/delete');
+      expect(service.getAllWidgetConfigs(), isEmpty,
+          reason: 'Counts equal but mapping broken → orphan config must be deleted');
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString('wcfg_1001_configId'), isNull,
+          reason: 'Mapping of the orphan must be cleaned in both directions');
+    });
+
+    test('Phase1 P0-2: unbound config (no mapping at all) is deleted', () async {
+      // Direction 1: a Hive config with NO wcfg_* mapping is a phantom — no
+      // physical widget ever claimed it. Full scan must delete it.
+      SharedPreferences.setMockInitialValues({});
+      final service = StorageService();
+      await service.init(testPath: tempDir.path);
+
+      final col = await service.createCollection('Test');
+      await service.createWidgetConfig(collectionId: col.id);
+      expect(service.getAllWidgetConfigs().length, 1);
+
+      // Native has an unrelated widget; our config has no mapping.
+      service.setWidgetIdsProvider(() async => [2002]);
+
+      await service.reconcileWidgetConfigs();
+
+      expect(service.getAllWidgetConfigs(), isEmpty,
+          reason: 'Config without any wcfg_* mapping is a phantom → deleted');
+    });
+
+    test('Phase1 P0-2: native id with stale mapping to missing config cleaned',
+        () async {
+      // Direction 2: native widget 42 maps to a config that no longer exists
+      // in Hive (its collection was deleted) → the stale wcfg_* mapping must
+      // be removed even when the counts happen to be equal.
+      SharedPreferences.setMockInitialValues({
+        'wcfg_42_configId': 'deleted-config-abc',
+        'wcfg_deleted-config-abc_appWidgetId': '42',
+      });
+      final service = StorageService();
+      await service.init(testPath: tempDir.path);
+      expect(service.getAllWidgetConfigs(), isEmpty);
+
+      service.setWidgetIdsProvider(() async => [42]);
+      await service.reconcileWidgetConfigs();
+
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString('wcfg_42_configId'), isNull,
+          reason: 'Stale appWidgetId→config mapping must be cleaned');
+      expect(prefs.getString('wcfg_deleted-config-abc_appWidgetId'), isNull,
+          reason: 'Stale config→appWidgetId mapping must be cleaned');
     });
 
     test('reverse: native ids without Hive config are left alone', () async {

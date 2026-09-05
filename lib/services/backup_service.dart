@@ -5,7 +5,6 @@ import 'package:share_plus/share_plus.dart';
 import '../models/backup_data.dart';
 import '../models/collection_model.dart';
 import '../models/item_model.dart';
-import '../models/widget_config_model.dart';
 import 'storage_service.dart';
 import 'snapshot_manager.dart';
 
@@ -15,16 +14,22 @@ class BackupService {
 
   BackupService(this._storageService, this._snapshotManager);
 
-  /// Export all data to JSON file
+  /// Export all data to JSON file.
+  ///
+  /// V1 semantics (Phase 1 P0-3): backups carry Collections + Items ONLY.
+  /// Active WidgetConfigs are never serialized (the schema field stays as an
+  /// empty list) — a physical Home Screen widget cannot travel in a JSON file,
+  /// and restoring configs with no matching appWidgetId creates phantom configs
+  /// that block the Free limit / show stale content.
   Future<String> exportBackup() async {
     final collections = _storageService.getAllCollections();
     final items = _storageService.getAllItems();
-    final widgetConfigs = _storageService.getAllWidgetConfigs();
 
     final backup = BackupData.create(
       collections: collections,
       items: items,
-      widgetConfigs: widgetConfigs,
+      // Intentionally empty: widget configs are device-bound, not backup data.
+      widgetConfigs: const [],
     );
 
     final json = jsonEncode(backup.toJson());
@@ -89,7 +94,9 @@ class BackupService {
         );
       }
 
-      // Validate required fields
+      // Validate required fields. `widgetConfigs` is OPTIONAL (V1 semantics,
+      // Phase 1 P0-3): new exports write it as an empty list, old files may
+      // carry configs — either way the content is IGNORED on restore.
       if (data['schemaVersion'] == null) {
         return ImportResult(
           success: false,
@@ -97,17 +104,18 @@ class BackupService {
         );
       }
 
-      if (data['collections'] == null || data['items'] == null || data['widgetConfigs'] == null) {
+      if (data['collections'] == null || data['items'] == null) {
         return ImportResult(
           success: false,
           message: 'Missing required fields',
         );
       }
 
-      // Parse data
+      // Parse data. widgetConfigs in the file are intentionally DROPPED —
+      // restoring them would create phantom Hive configs with no physical
+      // widget (V1 semantics, Phase 1 P0-3).
       List<Collection> collections;
       List<Item> items;
-      List<WidgetConfig> widgetConfigs;
 
       try {
         collections = (data['collections'] as List)
@@ -115,9 +123,6 @@ class BackupService {
             .toList();
         items = (data['items'] as List)
             .map((i) => Item.fromJson(i as Map<String, dynamic>))
-            .toList();
-        widgetConfigs = (data['widgetConfigs'] as List)
-            .map((w) => WidgetConfig.fromJson(w as Map<String, dynamic>))
             .toList();
       } catch (e) {
         return ImportResult(
@@ -129,11 +134,9 @@ class BackupService {
       // Deduplicate within backup file
       final seenCollectionIds = <String>{};
       final seenItemIds = <String>{};
-      final seenConfigIds = <String>{};
 
       collections = collections.where((c) => seenCollectionIds.add(c.id)).toList();
       items = items.where((i) => seenItemIds.add(i.id)).toList();
-      widgetConfigs = widgetConfigs.where((w) => seenConfigIds.add(w.id)).toList();
 
       // Validate item references
       final validCollectionIds = collections.map((c) => c.id).toSet();
@@ -151,7 +154,8 @@ class BackupService {
           await _storageService.restoreFromBackup(
             collections: collections,
             items: items,
-            widgetConfigs: widgetConfigs,
+            // Never restore widget configs from a backup file (no phantom).
+            widgetConfigs: const [],
           );
         } catch (e) {
           // Rollback on failure
@@ -166,7 +170,8 @@ class BackupService {
         await _storageService.appendFromBackup(
           collections: collections,
           items: items,
-          widgetConfigs: widgetConfigs,
+          // Never restore widget configs from a backup file (no phantom).
+          widgetConfigs: const [],
         );
       }
 
@@ -175,7 +180,8 @@ class BackupService {
         message: 'Import successful',
         collectionsImported: collections.length,
         itemsImported: items.length,
-        widgetConfigsImported: widgetConfigs.length,
+        // V1 semantics (Phase 1 P0-3): widget configs are never restored.
+        widgetConfigsImported: 0,
       );
     } catch (e) {
       return ImportResult(

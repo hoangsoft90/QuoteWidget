@@ -378,36 +378,60 @@ class StorageService {
     return config;
   }
 
-  /// Hybrid reconciliation (plan4 Sprint A-2).
+  /// Hybrid reconciliation (plan4 Sprint A-2, hardened Phase 1 P0-2).
   ///
-  /// Compares the Hive WidgetConfig count with the NATIVE configured-widget
-  /// count. Equal → fast path (no full scan — not every launch). Differ →
-  /// full scan: a Hive config whose mapped appWidgetId is no longer in the
-  /// native set is an orphan (its physical widget is gone, e.g. deleted off
-  /// the Home Screen while the app was closed) → remove the config AND its
-  /// wcfg_* mapping (both directions). Native ids without a Hive config are
-  /// unconfigured widgets — left alone ("Tap to set up" state).
+  /// ALWAYS runs the full 2-way scan whenever the native widget-id list is
+  /// available — the old "count == count → fast path" skip was a P1 bug: an
+  /// equal count can still hide a broken/absent mapping ("count bằng nhau nhưng
+  /// mapping gãy").
+  ///
+  /// Direction 1 — every Hive config must be backed by a live physical widget:
+  ///   - `appWidgetId == null` (no wcfg_* mapping at all) → unbound/phantom
+  ///     config → delete.
+  ///   - mapped `appWidgetId` not in the native set → physical widget is gone
+  ///     (deleted off the Home Screen while the app was closed) → delete the
+  ///     config AND its wcfg_* mapping (both directions).
+  /// Direction 2 — every native widget must not hold a stale mapping:
+  ///   - `wcfg_<id>_configId` points at a config missing from Hive (its
+  ///     collection was deleted) → remove the stale mapping (both directions).
+  ///   - no mapping → unconfigured widget → left alone ("Tap to set up").
+  ///
+  /// Never destroys data when the native channel is unavailable (provider
+  /// returns null). Guarded against re-entrant runs (resume while scanning).
   Future<void> reconcileWidgetConfigs() async {
     final provider = _widgetIdsProvider;
     if (provider == null || _reconciling) return;
 
     final nativeIds = await provider();
     if (nativeIds == null) return; // channel unavailable → don't destroy data
-
-    final hiveConfigs = _widgetConfigsBox.values.toList();
-    // Fast path: counts agree → skip full scan (plan §2 anti-pattern guard).
-    if (hiveConfigs.length == nativeIds.length) return;
+    final nativeIdSet = nativeIds.toSet();
 
     _reconciling = true;
     try {
+      final hiveConfigs = _widgetConfigsBox.values.toList();
+      // Direction 1: Hive config → mapping → live native widget.
       for (final config in hiveConfigs) {
         final appWidgetId =
             await WidgetDataBridge.getAppWidgetIdForConfig(config.id);
-        if (appWidgetId != null && !nativeIds.contains(appWidgetId)) {
-          // Orphan: physical widget no longer exists → clean config + mapping.
+        if (appWidgetId == null) {
+          // Unbound / phantom config — no physical widget ever claimed it.
+          await _widgetConfigsBox.delete(config.id);
+        } else if (!nativeIdSet.contains(appWidgetId)) {
+          // Physical widget gone → clean config + mapping (both directions).
           await WidgetDataBridge.removeWidgetMapping(appWidgetId);
           await _widgetConfigsBox.delete(config.id);
         }
+      }
+      // Direction 2: native widget → mapping → live Hive config.
+      final liveConfigIds = _widgetConfigsBox.keys.toSet();
+      for (final nativeId in nativeIds) {
+        final configId =
+            await WidgetDataBridge.getConfigIdForWidget(nativeId);
+        if (configId != null && !liveConfigIds.contains(configId)) {
+          // Stale mapping (config deleted, e.g. its collection was removed).
+          await WidgetDataBridge.removeWidgetMapping(nativeId);
+        }
+        // configId == null → unconfigured widget → keep ("Tap to set up").
       }
     } finally {
       _reconciling = false;

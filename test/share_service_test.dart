@@ -59,11 +59,9 @@ void main() {
       expect(items[1].order, greaterThan(items[0].order));
     });
 
-    test('saveToCollection returns null when save fails', () async {
-      // Deleting the collection first → createItem on a missing collection is
-      // still a valid Hive put (Hive is schema-less), so force failure by
-      // closing the box instead — or simpler: empty text is rejected earlier
-      // in processShareText, but saveToCollection itself must not throw.
+    test('undo target: deleteItem removes exactly the saved item', () async {
+      // Undo target is exactly the item saved — verify deleteItem removes it.
+      // (saveToCollection itself must not throw on normal input.)
       final col = await storage.createCollection('Vocab');
       final item = await ShareService(storage).saveToCollection(
         text: 'x',
@@ -71,17 +69,10 @@ void main() {
       );
       expect(item, isNotNull);
 
-      // Undo target is exactly the item saved — verify deleteItem removes it.
       await storage.deleteItem(item!.id);
       expect(storage.getItem(item.id), isNull,
           reason: 'Undo uses deleteItem → item goes to Trash (recoverable)');
       expect(storage.getItemCountForCollection(col.id), 0);
-    });
-
-    test('processShareText still classifies plain text as savable', () async {
-      final result = await ShareService(storage).processShareText('some text');
-      expect(result.success, isTrue);
-      expect(result.text, 'some text');
     });
   });
 }

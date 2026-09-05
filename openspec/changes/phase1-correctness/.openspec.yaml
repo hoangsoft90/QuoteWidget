@@ -1,0 +1,8 @@
+change: phase1-correctness
+name: Phase 1 — Production Correctness (plan phase0_checklist)
+kind: bugfix
+description: >
+  Remove the reconcile fast-path skip so the 2-way Hive↔wcfg_*↔native mapping
+  is always checked; stop exporting/restoring active WidgetConfigs (phantom
+  risk); delete dead processShareText/ShareResult code; fix the WidgetDataBridge
+  header comment; document the release TEST_ADS=false runbook.
