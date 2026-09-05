@@ -1,17 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Phase 2B: horizontal+vertical resize so users can stretch to 4x2
+     (features_final 1.4); onAppWidgetOptionsChanged picks the layout. -->
+<!-- Phase 2B: 30-min system tick so every_1h/3h/6h auto-rotate and the
+     daily snap re-evaluate without the app being open (features_final 3).
+     updatePeriodMillis is the Android minimum; exact timing is
+     OEM-dependent (UI disclaimer covers delay). -->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:initialLayout="@layout/widget_loading"
     android:minWidth="110dp"
     android:minHeight="110dp"
     android:minResizeWidth="110dp"
     android:minResizeHeight="110dp"
-    <!-- Phase 2B: horizontal+vertical resize so users can stretch to 4×2
-         (features_final §1.4); onAppWidgetOptionsChanged picks the layout. -->
     android:resizeMode="horizontal|vertical"
-    <!-- Phase 2B: 30-min system tick so every_1h/3h/6h auto-rotate and the
-         daily snap re-evaluate without the app being open (features_final
-         §3). updatePeriodMillis is the Android minimum; exact timing is
-         OEM-dependent (UI disclaimer covers delay). -->
     android:updatePeriodMillis="1800000"
     android:widgetCategory="home_screen"
     android:previewLayout="@layout/widget_small_preview"

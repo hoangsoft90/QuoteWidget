@@ -217,6 +217,76 @@ void main() {
     });
   });
 
+  group('Forensic: native tap progress preserved on re-sync', () {
+    late Directory tempDir;
+    late StorageService storage;
+
+    setUp(() async {
+      SharedPreferences.setMockInitialValues({});
+      tempDir = await Directory.systemTemp.createTemp('widget_svc_fx_');
+      storage = StorageService();
+      await storage.init(testPath: tempDir.path);
+    });
+
+    tearDown(() async {
+      await storage.clearAll();
+      await tempDir.delete(recursive: true);
+    });
+
+    test('re-sync keeps the native currentIndex instead of resetting to 0',
+        () async {
+      final calls = mockHomeWidgetChannel();
+      final col = await storage.createCollection('Vocab');
+      await storage.createItem(collectionId: col.id, text: 'A', order: 0);
+      await storage.createItem(collectionId: col.id, text: 'B', order: 1);
+      await storage.createItem(collectionId: col.id, text: 'C', order: 2);
+      final config = await storage.createWidgetConfig(collectionId: col.id);
+      final service = WidgetService(storage);
+
+      // First sync (config index 0).
+      await service.syncWidgetData(config, appWidgetId: 11);
+      // Simulate native taps: Kotlin advanced the prefs index to 2.
+      // Kotlin writes via its own prefs, not the channel — emulate by
+      // intercepting the channel: next sync reads getWidgetData → return 2.
+      // Mock getWidgetData to return the advanced index.
+      final getCalls = <String>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(
+              const MethodChannel('home_widget'), (call) async {
+        if (call.method == 'getWidgetData') {
+          getCalls.add((call.arguments as Map)['id'] as String);
+          if ((call.arguments as Map)['id'] == 'widget_11_currentIndex') {
+            return '2'; // native taps advanced to index 2
+          }
+          return null;
+        }
+        calls.add(call);
+        return null;
+      });
+
+      // Re-sync after an item edit (config.currentIndex still 0 in Hive).
+      await service.syncWidgetData(config, appWidgetId: 11);
+
+      // Take the LAST write for an id: the first sync wrote 0, the re-sync
+      // must write the preserved native index (2).
+      String? saved(String id) {
+        String? value;
+        for (final call in calls) {
+          if (call.method == 'saveWidgetData' &&
+              (call.arguments as Map)['id'] == id) {
+            value = (call.arguments as Map)['data'] as String?;
+          }
+        }
+        return value;
+      }
+
+      expect(saved('widget_11_currentIndex'), '2',
+          reason: 'native tap progress must survive a Flutter re-sync');
+      expect(saved('widget_11_text'), 'C',
+          reason: 'displayed text follows the preserved native index');
+    });
+  });
+
   group('syncProStatus startup push (plan5 Sprint 0 §1.6)', () {
     test('expired Pro (isPro=false) writes state THEN pushes updateWidget',
         () async {

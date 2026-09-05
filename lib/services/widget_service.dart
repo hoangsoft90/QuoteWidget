@@ -34,13 +34,28 @@ class WidgetService {
         ? allItems.where((i) => i.favorite).toList()
         : allItems;
 
+    // Forensic review fix: preserve NATIVE tap progress on re-sync. The user
+    // cycles the widget on the Home Screen (Kotlin advances the prefs index,
+    // Hive config.currentIndex stays 0). Re-syncing after an item edit used
+    // to reset the displayed item to 0 — read the native index back and keep
+    // it when it is still valid for the current pool.
+    var displayIndex = config.currentIndex;
+    if (resolvedId > 0) {
+      final nativeIndex =
+          await HomeWidget.getWidgetData<String>('widget_${resolvedId}_currentIndex');
+      final parsed = int.tryParse(nativeIndex ?? '');
+      if (parsed != null && parsed >= 0 && parsed < items.length) {
+        displayIndex = parsed;
+      }
+    }
+
     String? text;
-    if (items.isNotEmpty && config.currentIndex < items.length) {
-      text = items[config.currentIndex].text;
+    if (items.isNotEmpty && displayIndex < items.length) {
+      text = items[displayIndex].text;
     }
 
     final prefix = 'widget_$resolvedId';
-    await HomeWidget.saveWidgetData('${prefix}_currentIndex', config.currentIndex.toString());
+    await HomeWidget.saveWidgetData('${prefix}_currentIndex', displayIndex.toString());
     await HomeWidget.saveWidgetData('${prefix}_collectionId', config.collectionId);
     await HomeWidget.saveWidgetData('${prefix}_rotationMode', config.rotationMode.name);
     await HomeWidget.saveWidgetData('${prefix}_totalItems', items.length.toString());
@@ -57,8 +72,10 @@ class WidgetService {
     await HomeWidget.saveWidgetData('${prefix}_tapAction', config.tapAction.name);
     // Phase 2B: shuffle-bag + schedule state (features_final §2/§3). Native
     // keys are flat primitives; the bag is the one allowed JSON list.
+    // Pass the preserved native index (not config.currentIndex, which Hive
+    // keeps at 0) so a fresh bag never repeats the item currently shown.
     if (config.rotationMode == RotationMode.shuffleBag) {
-      await _syncShuffleBag(prefix, items, config.currentIndex);
+      await _syncShuffleBag(prefix, items, displayIndex);
     }
     if (config.schedule == ScheduleMode.every1h ||
         config.schedule == ScheduleMode.every3h ||
