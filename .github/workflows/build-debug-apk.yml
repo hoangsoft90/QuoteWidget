@@ -4,6 +4,15 @@ on:
   push:
     branches: [master, main]
   workflow_dispatch:
+    inputs:
+      # Device-QA gate (Phase 4): manual dispatch lets QA build the release
+      # candidate with PRODUCTION ad units (TEST_ADS=false) for MUST cases
+      # C1/H1 — without any local build. Push builds keep defaulting to test
+      # ads (expression falls back to 'true' when inputs is empty).
+      test_ads:
+        description: 'Use Google test ad unit IDs (true) or production units (false)'
+        type: boolean
+        default: true
 
 jobs:
   build:
@@ -84,7 +93,8 @@ jobs:
       - name: Build release APK
         id: build-release
         run: |
-          flutter build apk --release --no-pub 2>&1 | tee build-release-output.txt
+          flutter build apk --release --no-pub \
+            --dart-define=TEST_ADS=${{ inputs.test_ads || 'true' }} 2>&1 | tee build-release-output.txt
           echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
 
       - name: Show release build output
