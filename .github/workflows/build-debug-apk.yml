@@ -39,7 +39,9 @@ jobs:
           flutter pub get
 
       - name: Analyze
-        run: flutter analyze --no-pub
+        # plan6 C5: fatal warnings — a warning (e.g. `unused_local_variable`
+        # silently ignored) must fail CI instead of shipping dead/broken code.
+        run: flutter analyze --no-pub --fatal-warnings
 
       - name: Run tests
         run: flutter test --no-pub 2>&1 | tail -10

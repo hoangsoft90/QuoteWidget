@@ -1,7 +1,7 @@
 # Features — Quote Widget ("Your Words")
 
 > Tài liệu đầy đủ tính năng + UI của app, đối chiếu trực tiếp với source code.
-> Cập nhật lần cuối: 2026-09-04 (HEAD `4d6ce76`, CI green debug + release).
+> Cập nhật lần cuối: 2026-09-05 (HEAD plan6-bugfix, CI green debug + release).
 
 **App:** Hiển thị nội dung cá nhân (quote, từ vựng, lời nhắc…) trên Home Screen widget Android.
 **Tech:** Flutter 3.47.1 / Dart 3.13.1 · Hive (local DB) · home_widget + Kotlin RemoteViews · Android only (minSdk 24, compileSdk/targetSdk 36).
@@ -24,8 +24,8 @@
 | 10 | **Recently Deleted** | `lib/screens/recently_deleted_screen.dart` | Trash: 2 section (Collections / Items), mỗi row có Restore (xanh) + Delete Forever (đỏ, có confirm), purge 30 ngày tự động |
 | 11 | **Backup & Restore** | `lib/screens/backup_screen.dart` | Export backup (JSON + share sheet), Import (Append / Overwrite — chọn trước khi import), Safety Snapshots (list, restore, giữ tối đa 3) |
 | 12 | **Widget Setup** | `lib/screens/widget_setup_screen.dart` | Màn hình cấu hình widget: chọn collection → "Set Up Widget". Là **điểm chặn widget limit**: Free user thêm widget thứ 2 → paywall bottom sheet (Watch Ad — Unlock 24h / Cancel) |
-| 13 | **Collection Picker** (dialog) | `lib/screens/collection_picker_dialog.dart` | Khi share text và có >1 collection: chọn đích lưu, kèm tùy chọn "Create New Collection" |
-| — | ~~Widget Config~~ | `lib/screens/widget_config_screen.dart` | **DEAD CODE** — không được import ở đâu (rule project: không thêm feature vào đây). `WidgetPreview` cũng chỉ dùng trong screen này |
+| 13 | **Collection Picker** (dialog) | `lib/screens/collection_picker_dialog.dart` | Khi share text và người dùng chọn "Đổi collection" trong dialog xác nhận: chọn đích lưu, kèm tùy chọn "Create New Collection" |
+| — | ~~Widget Config~~ | ~~`lib/screens/widget_config_screen.dart`~~ | **ĐÃ XÓA** (plan6 C5, 2026-09-05) — dead code không được import; kèm `widget_preview.dart` cũng không còn ai dùng |
 
 ---
 
@@ -68,6 +68,8 @@
 
 **Registry consistency (Sprint A, plan4):** free-limit gate đọc NATIVE `configured_widget_ids` qua MethodChannel `quotewidget/widgets` (không tin Hive box — tránh dead-end trap); app start/resume chạy `reconcileWidgetConfigs()` hybrid (so count, lệch mới quét full xoá orphaned config + mapping).
 
+**Startup orphan-mapping cleanup (plan6 C1):** `main.dart` sau khi init đọc `configured_widget_ids` → với mỗi native id, resolve `wcfg_<id>_configId` qua `WidgetDataBridge.getConfigIdForWidget()` → nếu mapping tồn tại NHƯNG config tương ứng không còn trong Hive (collection đã bị xóa) → gọi `removeWidgetMapping()` dọn mapping cũ (2 chiều). Widget chưa có mapping = "Tap to set up" — không đụng tới. Chạy trong `Future.microtask` (không chặn frame đầu). Fix thay thế block so sánh int-vs-UUID luôn-false trước đó (bị `// ignore: unused_local_variable` che giấu).
+
 ---
 
 ## 4. Onboarding & Sample data
@@ -101,17 +103,19 @@
 **Config (`AdConfig`):**
 - `ENABLE_ADS=true` (default) — tắt ads bằng `--dart-define=ENABLE_ADS=false`.
 - `TEST_ADS=true` (default) — mọi unit ID resolve về sample ID của Google (không bị AdMob giới hạn khi test). Bật ads thật: `--dart-define=TEST_ADS=false`.
-- App ID thật trong manifest (`ca-app-pub-6917313063209470~9587990603`), unit IDs real banner/interstitial trong code (rewarded real ID còn TODO — phải đăng ký trước khi tắt TEST_ADS).
+- App ID thật trong manifest (`ca-app-pub-6917313063209470~9587990603`); **cả 3 unit ID real** trong code — rewarded `ca-app-pub-6917313063209470/7613467914` đã đăng ký & thay thế (plan6 C4, 2026-09-05), KHÁC sample ID `_testRewarded`.
 - `nonPersonalizedExtras = {'npa': '1'}` — quảng cáo không cá nhân hóa.
 
 **Widget limit (free = 1 widget):** enforce 2 tầng — `StorageService.createWidgetConfig` ném `WidgetLimitReachedException` (Flutter) + placeholder native "Upgrade to Pro" khi kéo widget thứ 2 (Kotlin `onUpdate`). Pro provider live (`setProStatusProvider`) → hết 24h là tự khóa lại ngay.
+
+> **Chiến lược chính thức (2026-09-05, plan6 H1 — KHÔNG đảo ngược):** rewarded-ad 24h **chỉ mở thêm widget limit**, KHÔNG tắt banner/interstitial. IAP đã gỡ là chủ đích (2026-09-03, giữ nguyên) — không phải "phần còn sót cần dọn". Banner luôn hiện kể cả Pro.
 
 ---
 
 ## 7. Share từ app khác (Task 2)
 
-- `ShareReceiverActivity` nhận `ACTION_SEND text/plain` → ghi `flutter.pending_share_text` + `flutter.share_timestamp` vào **đúng file `FlutterSharedPreferences`** (key prefix `flutter.`) bằng `.commit()` đồng bộ → `finish()` **không mở app UI** (translucent theme, noHistory, excludeFromRecents → không flash).
-- `main.dart` `_handlePendingShare()` khi mở app: 0 collection → toast nhắc tạo; **1 collection → auto-save + refresh widget + SnackBar "Saved to <name>" có nút Undo (10s)**; nhiều collection → dialog picker (kèm tạo mới) rồi cùng SnackBar+Undo.
+- `ShareReceiverActivity` nhận `ACTION_SEND text/plain` → ghi `flutter.pending_share_text` + `flutter.share_timestamp` vào **đúng file `FlutterSharedPreferences`** (key prefix `flutter.`) bằng `.commit()` đồng bộ → `finish()` **không mở app UI** (translucent theme, noHistory, excludeFromRecents → không flash). Kotlin KHÔNG ghi Hive — chỉ prefs (plan6 H5 verify).
+- `main.dart` `_handlePendingShare()` khi mở app (plan6 H5): 0 collection → toast nhắc tạo; có collection → **dialog xác nhận** `lib/widgets/share_target_dialog.dart`: "Lưu vào [collection mặc định/gần nhất]" / "Đổi collection" (mở picker) / "Huỷ" — **KHÔNG auto-save, không timer 5s**. Sau khi xác nhận lưu → refresh widget + SnackBar "Saved to <name>" có nút Undo (10s, §1.7).
 - **Quick Share Undo (§1.7):** `ShareService.saveToCollection` trả đúng `Item` vừa tạo (Undo target chính xác, không đoán). Tap **Undo** trong ~10s → soft-delete item đó (về Trash — recoverable) + refresh widget collection → xác nhận "Share removed". UI nằm trong `lib/widgets/share_undo_snackbar.dart` (helper testable). SnackBar tự hết hạn — không Undo sau cửa sổ.
 - Toast native (channel `quotewidget/toast` trong `MainActivity`) chỉ còn cho các path không có gì để undo (fail / chưa có collection).
 
@@ -149,11 +153,11 @@
 
 ---
 
-## 11. Test suite (93 tests)
+## 11. Test suite
 
-- `flutter test` → **93/93 pass**; `flutter analyze` → 0 errors, 0 warnings.
-- Phủ: storage (collections/items/widget-configs/trash/purge/limit + A1 native-count gate + A2 reconciliation), rotation service, IAP (time-bound Pro, permanent, Fix B widget-push), rewarded outcome gate (Fix A), interstitial frequency gate, backup import/export, curated themes consistency (id ↔ drawable ↔ native), widget limit, **share service (§1.7 Undo target)**, **share-undo SnackBar UI (3 widget tests §1.7)**, **syncProStatus startup-push (§1.6, channel mock)**, paywall sheet (4), onboarding/sample data.
-- Mô phỏng: Hive `init(testPath:)`, SharedPreferences `setMockInitialValues`, MethodChannel mock (`home_widget`, toast).
+- `flutter test` → **toàn bộ pass**; `flutter analyze` → 0 errors, 0 warnings (`--fatal-warnings` chạy trên CI — plan6 C5).
+- Phủ: storage (collections/items/widget-configs/trash/purge/limit + A1 native-count gate + A2 reconciliation + **C1 orphan-mapping cleanup**), rotation service, IAP (time-bound Pro, permanent, Fix B widget-push), rewarded outcome gate (Fix A) + **H2 no-ad → unavailable enum**, interstitial frequency gate, backup import/export, curated themes consistency, widget limit, **share service (§1.7 Undo target)**, **share-undo SnackBar UI (3 widget tests §1.7)**, **share-target dialog UI (5 widget tests plan6 H5)**, **restore rollback (2 integration tests plan6 H6 — snapshot trước clearAll, rollback về đúng trạng thái cũ)**, **syncProStatus startup-push (§1.6)**, paywall sheet, onboarding/sample data.
+- Mô phỏng: Hive `init(testPath:)`, SharedPreferences `setMockInitialValues`, MethodChannel mock (`home_widget`, toast), `PathProviderPlatform` fake (H6).
 
 ---
 
@@ -161,7 +165,8 @@
 
 - **KHÔNG** thêm: photo background, custom fonts, iOS widget, cloud sync (feature freeze — plan3).
 - **KHÔNG** tạo/đổi file SharedPreferences hay key Pro (rule critical).
-- **Dead code:** `widget_config_screen.dart` (unreachable) — không thêm feature.
-- **2026-09-04:** `in_app_purchase` đã gỡ khỏi pubspec (IAP removed) — chỉ còn rewarded-ad 24h. `proUnlockedUntil = DateTime(9999)` chỉ còn từ legacy migration (`iap_pro_purchased`).
+- **Dead code:** `widget_config_screen.dart` + `widget_preview.dart` **đã xóa** (plan6 C5) — không còn nữa.
+- **2026-09-04:** `in_app_purchase` đã gỡ khỏi pubspec (IAP removed) — chỉ còn rewarded-ad 24h. `proUnlockedUntil = DateTime(9999)` chỉ còn từ legacy migration (`iap_pro_purchased`). **Giữ nguyên là chủ đích** (plan6 H1 xác nhận lại).
 - **2026-09-04 (plan5 Sprint 0):** §1.6 Graceful Pro-expiry + startup re-render push; §1.7 Quick Share Undo + fix latent crash share multi-collection. Sprint 1/2/3 chưa mở — gate cứng: pass device test §1.8 trước.
-- TODO còn mở: đăng ký **rewarded ad unit ID thật** trong AdMob console trước khi tắt `TEST_ADS`; **bật GitHub Pages** trong repo settings (Settings → Pages → Source: GitHub Actions) để `privacy.html` deploy; **device test thật (plan5 §1.8 gate, danh sách chi tiết trong `checklist.md`)** — FAB không đè ad, paywall chỉ còn Watch Ad, Pro hết hạn → widget 2 "24h Pass Expired" + widget 1 vẫn chạy, Quick Share Undo, rewarded flow, background share, theme render.
+- **2026-09-05 (plan6):** C1 startup orphan-mapping cleanup (fix reconciliation giả chết); C4 rewarded real ID `.../7613467914`; C5 xóa dead code + CI `--fatal-warnings` + rule cấm ignore trần; H2 rewarded no-ad → dialog Retry; H5 share dialog xác nhận đích lưu; H6 test rollback restore.
+- TODO còn mở: **bật GitHub Pages** trong repo settings (Settings → Pages → Source: GitHub Actions) để `privacy.html` deploy; **device test thật (plan5 §1.8 + plan6 Device QA Gate, danh sách chi tiết trong `checklist.md`)** — free-limit chặn trong app, `wcfg_*` sạch sau khi kéo widget, force-stop/reboot render đúng, Pro hết hạn tự khóa, 2 widget rotation độc lập, appWidgetId reuse, share sheet dialog, migration idempotent, TEST_ADS=false logcat đúng ad unit.

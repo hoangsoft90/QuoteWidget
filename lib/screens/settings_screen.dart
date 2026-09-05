@@ -7,6 +7,7 @@ import '../services/rewarded_ad_service.dart';
 import '../services/snapshot_manager.dart';
 import '../services/storage_service.dart';
 import '../services/widget_service.dart';
+import '../widgets/ad_unavailable_dialog.dart';
 import 'backup_screen.dart';
 import 'recently_deleted_screen.dart';
 
@@ -41,15 +42,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (_isWatchingAd) return;
     setState(() => _isWatchingAd = true);
     try {
-      final rewarded = await widget.rewardedAdService.showRewardedAd();
+      // plan6 H2: loop with a retry dialog while no ad is available instead
+      // of a silent dead-end. granted → green success; dismissed early →
+      // orange try-again; unavailable + user cancels → same try-again snack.
+      var result = await widget.rewardedAdService.showRewardedAd();
+      while (result == RewardedAdResult.unavailable) {
+        if (!mounted) return;
+        final retry = await showAdUnavailableDialog(context);
+        if (!retry) break;
+        result = await widget.rewardedAdService.showRewardedAd();
+      }
       if (mounted) {
         setState(() {}); // Refresh Pro status row
-        ScaffoldMessenger.of(context).showSnackBar(
+        final messenger = ScaffoldMessenger.of(context);
+        messenger.showSnackBar(
           SnackBar(
-            content: Text(rewarded
+            content: Text(result == RewardedAdResult.granted
                 ? 'Pro unlocked for 24 hours!'
                 : 'Ad not finished. Please try again.'),
-            backgroundColor: rewarded ? Colors.green : Colors.orange,
+            backgroundColor: result == RewardedAdResult.granted
+                ? Colors.green
+                : Colors.orange,
           ),
         );
       }

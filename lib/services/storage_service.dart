@@ -418,6 +418,27 @@ class StorageService {
     return _widgetConfigsBox.values.toList();
   }
 
+  /// plan6 C1: clean orphan `wcfg_*` mappings at startup.
+  ///
+  /// A native widget whose Hive config no longer exists (e.g. its collection
+  /// was deleted) leaves a stale `wcfg_<appWidgetId>_configId` +
+  /// `wcfg_<configId>_appWidgetId` pair behind. Android may later reuse the
+  /// appWidgetId, so a stale mapping must not survive. Widgets WITHOUT a
+  /// mapping are unconfigured — left alone (the native "Tap to set up"
+  /// state). Never throws on malformed input.
+  Future<void> cleanupOrphanWidgetMappings(List<int> configuredIds) async {
+    if (configuredIds.isEmpty) return;
+    final existingConfigIds = _widgetConfigsBox.keys.toSet();
+    for (final appWidgetId in configuredIds) {
+      final configId =
+          await WidgetDataBridge.getConfigIdForWidget(appWidgetId);
+      if (configId == null) continue; // no mapping → unconfigured, keep
+      if (!existingConfigIds.contains(configId)) {
+        await WidgetDataBridge.removeWidgetMapping(appWidgetId);
+      }
+    }
+  }
+
   WidgetConfig? getWidgetConfig(String id) {
     return _widgetConfigsBox.get(id);
   }

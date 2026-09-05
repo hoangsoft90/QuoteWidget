@@ -18,6 +18,21 @@ class _FakeIapService extends IapService {
 }
 
 void main() {
+  group('showRewardedAd outcome (plan6 H2)', () {
+    test('no ad loaded/loadable → unavailable (not granted, not dismissed)',
+        () async {
+      // In the test env AdConfig.supported is false → loadRewardedAd is a
+      // no-op and _rewardedAd stays null → must report unavailable so the
+      // UI can show the retry dialog instead of a silent dead-end.
+      final iap = _FakeIapService();
+      final service = RewardedAdService(iap);
+
+      expect(await service.showRewardedAd(), RewardedAdResult.unavailable);
+      expect(iap.unlockCalls, 0,
+          reason: 'No ad shown → no unlock attempt');
+    });
+  });
+
   group('resolveRewardOutcome (plan3 Fix A — grant only after persist)', () {
     test('no reward → false and unlock is never attempted', () async {
       final iap = _FakeIapService();

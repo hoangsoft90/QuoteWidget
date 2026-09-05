@@ -18,6 +18,7 @@ import 'screens/onboarding_screen.dart';
 import 'screens/collection_picker_dialog.dart';
 import 'screens/widget_setup_screen.dart';
 import 'widgets/paywall_sheet.dart';
+import 'widgets/share_target_dialog.dart';
 import 'widgets/share_undo_snackbar.dart';
 
 void main() async {
@@ -112,23 +113,27 @@ void main() async {
     await prefs.remove('pending_route');
   }
 
-  // Detect unconfigured widgets from Android system picker
-  // Kotlin writes 'configured_widget_ids' to SharedPreferences when widgets are placed.
-  // On app open, we check for widgets that exist but aren't in our Hive store.
-  final configuredIdsStr = prefs.getString('configured_widget_ids') ?? '';
-  final configuredIds = configuredIdsStr
-      .split(',')
-      .where((s) => s.isNotEmpty)
-      .map((s) => int.tryParse(s) ?? -1)
-      .where((id) => id >= 0)
-      .toList();
-  // Find widgets that Kotlin knows about but Flutter doesn't have WidgetConfigs for
-  final existingConfigs = storageService.getAllWidgetConfigs();
-  final existingConfigIds = existingConfigs.map((c) => c.id).toSet();
-  // ignore: unused_local_variable
-  final unconfiguredWidgetIds = configuredIds
-      .where((id) => !existingConfigIds.contains(id.toString()))
-      .toList();
+  // plan6 C1: reconcile native configured-widget ids against Hive configs.
+  // The OLD code compared int appWidgetIds against String config UUIDs
+  // (always false) and silenced the dead result with an `// ignore:
+  // unused_local_variable` — the reconciliation never actually ran. Correct
+  // version: for each native id, resolve its `wcfg_<id>_configId` mapping;
+  // if the referenced config no longer exists in Hive, the mapping is stale
+  // → clean it (both directions). Runs in a microtask so a large widget
+  // list never blocks the first frame.
+  Future<void> reconcileNativeWidgetMappings() async {
+    final configuredIdsStr = prefs.getString('configured_widget_ids') ?? '';
+    final configuredIds = configuredIdsStr
+        .split(',')
+        .where((s) => s.isNotEmpty)
+        .map((s) => int.tryParse(s) ?? -1)
+        .where((id) => id >= 0)
+        .toList();
+    if (configuredIds.isEmpty) return;
+    await storageService.cleanupOrphanWidgetMappings(configuredIds);
+  }
+
+  Future.microtask(reconcileNativeWidgetMappings);
 
   runApp(QuoteWidgetApp(
     storageService: storageService,
@@ -323,23 +328,31 @@ class _QuoteWidgetAppState extends State<QuoteWidgetApp> with WidgetsBindingObse
         confirmSaved(saved, collectionName, collectionId);
       }
 
-      if (collections.length == 1) {
-        // Only 1 collection → save straight to it (no app-ask needed).
-        final col = collections.first;
-        saveAndConfirm(col.id, col.name);
-      } else if (navigatorContext != null) {
-        // Multiple collections → ask which one (opening the picker is the only
-        // unambiguous way to choose a target).
-        showDialog(
-          context: navigatorContext,
-          builder: (context) => CollectionPickerDialog(
-            storageService: widget.storageService,
-            onSelected: (collection) {
-              saveAndConfirm(collection.id, collection.name);
-            },
-          ),
-        );
-      }
+      // plan6 H5: explicit share-target dialog instead of silent auto-save.
+      // Default = most recent collection (getAllCollections is newest-first).
+      // No 5s auto-save timer — the user decides on every share.
+      final defaultCollection = collections.first;
+      if (navigatorContext == null || !navigatorContext.mounted) return;
+      showShareTargetDialog(
+        navigatorContext,
+        defaultCollection: defaultCollection,
+      ).then((action) {
+        if (action == ShareTargetAction.saveDefault) {
+          saveAndConfirm(defaultCollection.id, defaultCollection.name);
+        } else if (action == ShareTargetAction.changeCollection &&
+            navigatorContext.mounted) {
+          showDialog(
+            context: navigatorContext,
+            builder: (context) => CollectionPickerDialog(
+              storageService: widget.storageService,
+              onSelected: (collection) {
+                saveAndConfirm(collection.id, collection.name);
+              },
+            ),
+          );
+        }
+        // cancel → abort, nothing saved.
+      });
     }
   }
 

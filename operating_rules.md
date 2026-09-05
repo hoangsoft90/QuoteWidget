@@ -58,6 +58,11 @@
 
 ## Do NOT
 
+- Do NOT use bare `// ignore: unused_local_variable` or `// ignore: unused_element` —
+  an unused local usually means logic is dead (plan6 C1: a broken reconciliation
+  was silenced this way). Either delete the dead code, or keep the ignore WITH a
+  comment directly above explaining exactly why (e.g. API-compat placeholder). If
+  unsure, ask the user instead of suppressing.
 - Do not REMOVE INTERNET permission (required by google_mobile_ads — ads are
   the primary monetization path; app data itself stays offline-first)
 - Do not disable TEST_ADS for normal dev builds (real units → AdMob can limit

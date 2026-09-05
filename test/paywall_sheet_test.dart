@@ -74,7 +74,7 @@ void main() {
     await tester.pumpAndSettle();
   });
 
-  testWidgets('Watch Ad with no ad ready → cancelled + retry snackbar',
+  testWidgets('Watch Ad with no ad ready → no-ad dialog, not silent',
       (tester) async {
     await tester.pumpWidget(
       MaterialApp(
@@ -100,6 +100,17 @@ void main() {
     await tester.tap(find.text('open'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Watch Ad — Unlock 24h'));
+    await tester.pumpAndSettle();
+
+    // plan6 H2: unavailable ad → retry dialog (not a silent dead-end).
+    expect(
+      find.text('Không có quảng cáo lúc này. Vui lòng thử lại sau ít phút.'),
+      findsOneWidget,
+    );
+    expect(find.text('Retry'), findsOneWidget);
+
+    // Cancel the dialog → sheet returns cancelled.
+    await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
     expect(find.text('Ad not finished. Please try again.'), findsOneWidget);
   });

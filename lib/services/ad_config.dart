@@ -30,11 +30,11 @@ class AdConfig {
   static const String _androidBanner = 'ca-app-pub-6917313063209470/1409128007';
   static const String _androidInterstitial =
       'ca-app-pub-6917313063209470/1569899782';
-  /// TODO: register a real rewarded ad unit in the AdMob console and replace
-  /// this ID BEFORE disabling TEST_ADS for production — rewarded is the
-  /// primary unlock path and must serve real ads once real ads are on.
+  /// Real Rewarded Ad Unit (plan6 C4) — created in the AdMob console
+  /// 2026-09-05, verified DIFFERENT from the sample `_testRewarded` ID so a
+  /// production build (TEST_ADS=false) serves real ads.
   static const String _androidRewarded =
-      'ca-app-pub-3940256099942544/5224354917';
+      'ca-app-pub-6917313063209470/7613467914';
 
   /// Google's official sample/test ad unit IDs (always fill, never limited).
   static const String _testBanner = 'ca-app-pub-3940256099942544/6300978111';

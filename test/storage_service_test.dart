@@ -408,6 +408,70 @@ void main() {
     });
   });
 
+  group('C1: Orphan wcfg_* mapping cleanup (plan6)', () {
+    test('stale mapping to a deleted config is removed, no throw', () async {
+      // Native registry knows widget 42; its mapping points at a config
+      // that no longer exists in Hive (the collection was deleted). The
+      // startup reconciliation must clean BOTH mapping directions.
+      SharedPreferences.setMockInitialValues({
+        'wcfg_42_configId': 'deleted-config-abc',
+        'wcfg_deleted-config-abc_appWidgetId': '42',
+      });
+      final service = StorageService();
+      await service.init(testPath: tempDir.path);
+      expect(service.getAllWidgetConfigs(), isEmpty,
+          reason: 'No config in Hive → mapping is orphaned');
+
+      // Must not throw even with a dangling mapping.
+      await service.cleanupOrphanWidgetMappings([42]);
+
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString('wcfg_42_configId'), isNull,
+          reason: 'appWidgetId→config mapping must be cleaned');
+      expect(prefs.getString('wcfg_deleted-config-abc_appWidgetId'), isNull,
+          reason: 'config→appWidgetId mapping must be cleaned');
+    });
+
+    test('mapping to an existing config is preserved', () async {
+      SharedPreferences.setMockInitialValues({});
+      final service = StorageService();
+      await service.init(testPath: tempDir.path);
+
+      final col = await service.createCollection('Test');
+      final config = await service.createWidgetConfig(collectionId: col.id);
+      await WidgetDataBridge.registerWidgetMapping(
+        appWidgetId: 42,
+        configId: config.id,
+      );
+
+      await service.cleanupOrphanWidgetMappings([42]);
+
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString('wcfg_42_configId'), config.id,
+          reason: 'Valid mapping must survive reconciliation');
+    });
+
+    test('unconfigured native widget (no mapping) is left alone', () async {
+      SharedPreferences.setMockInitialValues({});
+      final service = StorageService();
+      await service.init(testPath: tempDir.path);
+
+      // Widget 99 has NO wcfg_* mapping → native "Tap to set up" state.
+      await service.cleanupOrphanWidgetMappings([99]);
+
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString('wcfg_99_configId'), isNull);
+      expect(service.getAllWidgetConfigs(), isEmpty,
+          reason: 'Unconfigured widget must not create/delete anything');
+    });
+
+    test('empty native list is a no-op', () async {
+      final service = StorageService();
+      await service.init(testPath: tempDir.path);
+      await service.cleanupOrphanWidgetMappings([]); // must not throw
+    });
+  });
+
   group('Backup/Restore', () {
     test('clearAll removes everything', () async {
       final col = await service.createCollection('Test');

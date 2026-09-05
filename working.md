@@ -2,9 +2,46 @@
 
 ## Current Status
 
-**Phase:** plan5_final Sprint 0 code-complete — 91/91 tests pass
-**Next:** CI verify (push mới nhất) → **device test Sprint 0 §1.8** (bắt buộc, gated trước Sprint 1)
+**Phase:** plan6_final bugfix code-complete — **105/105 tests pass**, analyze `--fatal-warnings` exit 0
+**Next:** CI verify (push) → **device test (plan5 §1.8 + plan6 Device QA 10 mục)** (bắt buộc, gated trước Sprint 1)
 **Blocker:** Device test cần máy thật (không chạy được trong env này) — Sprint 1/2/3 chờ gate
+
+### [2026-09-05] plan6_final — Sprint 0 Critical & High bugfix
+- **C1 (CRITICAL) — startup reconciliation fix:** `main.dart` block cũ so int
+  appWidgetId vs String config UUID (luôn false) bị `// ignore: unused_local_variable`
+  che — reconciliation chưa từng chạy. Thay bằng `cleanupOrphanWidgetMappings()`
+  (StorageService): mỗi native id → resolve `wcfg_<id>_configId` qua
+  `getConfigIdForWidget()` → config không còn trong Hive → `removeWidgetMapping()`
+  (2 chiều); unconfigured widget (không mapping) giữ nguyên; chạy trong
+  `Future.microtask`. 4 tests.
+- **C4 (CRITICAL) — rewarded real ID:** `_androidRewarded` từng bằng sample ID của
+  Google (flip TEST_ADS=false → phục vụ test ads cho user thật). Đã đăng ký
+  Rewarded Ad Unit thật + thay bằng `ca-app-pub-6917313063209470/7613467914`.
+- **C5 (CRITICAL) — dead code + CI guard:** xóa `widget_config_screen.dart` +
+  `widget_preview.dart` (cả 2 dead, chỉ reference nhau); CI `flutter analyze
+  --fatal-warnings`; rule operating_rules.md: cấm `// ignore: unused_local_variable`
+  / `unused_element` trần (phải kèm comment lý do hoặc hỏi user).
+- **H2 — rewarded no-fill:** `RewardedAdResult { granted, dismissed, unavailable }`;
+  paywall + settings loop retry dialog "Không có quảng cáo lúc này. Vui lòng thử lại
+  sau ít phút." — hết dead-end im lặng. KHÔNG thêm free-fallback (chờ dữ liệu thật).
+- **H5 — share-target dialog:** `_handlePendingShare` không auto-save nữa — dialog
+  "Lưu vào [collection gần nhất] / Đổi collection / Huỷ" (share_target_dialog.dart,
+  testable, 5 tests). Không timer 5s. SnackBar Undo §1.7 vẫn giữ sau khi xác nhận lưu.
+- **H6 — restore rollback tests:** 2 integration tests (PathProviderPlatform fake):
+  restore fail giữa chừng → rollback về ĐÚNG trạng thái trước restore; snapshot chứa
+  dữ liệu CŨ (chứng minh tạo TRƯỚC clearAll); không data mới sót lại.
+- **H1/H3/H4:** H1 — rewarded-only giữ nguyên là chiến lược chính thức (user xác
+  nhận 2026-09-05, KHÔNG đảo ngược IAP); H3 — PREFS_VERSION đã có từ Sprint A-4
+  (verify); H4 — grep sạch, không hardcode Pro=true trong lib/ (chỉ legacy
+  migration `DateTime(9999)` khi đọc `iap_pro_purchased` cũ).
+- **C2/C3 verify:** onDeleted wcfg_* cleanup (Sprint A-3) + native-count gate
+  (Sprint A-1) đã tồn tại đúng như plan yêu cầu — không cần code mới (plan premise
+  stale). Lưu ý plan "cùng transaction" là bất khả thi vì widget_* (HomeWidgetPreferences)
+  vs wcfg_* (FlutterSharedPreferences) là 2 FILE khác nhau.
+- Tests: 93 → **105** (storage +4 C1 · rewarded +1 H2 · share_target_dialog +5 H5 ·
+  restore_rollback +2 H6; paywall_sheet test cập nhật theo dialog mới).
+- Openspec: `openspec/changes/plan6-bugfix/`.
+- **Device QA Gate (plan6, 10 mục)** — chưa chạy (cần Samsung + Pixel thật), xem checklist.md.
 
 ### [2026-09-03] Release-prep batch (ads thật + SDK36 + cleartext + icon + Sentry + nav)
 - **AdMob production setup:** real App ID in manifest
@@ -113,18 +150,20 @@
 ## Test Status
 
 ```
-91/91 tests pass (0 errors, 0 warnings on flutter analyze)
+105/105 tests pass (0 errors, 0 warnings on flutter analyze --fatal-warnings)
 ├── widget_limit_test.dart: 11
-├── storage_service_test.dart: 29 (incl. A1/A2 native-count + reconciliation)
+├── storage_service_test.dart: 33 (incl. A1/A2 + C1 orphan-mapping 4)
 ├── rotation_service_test.dart: 11
 ├── iap_service_test.dart: 7
 ├── curated_themes_test.dart: 4
 ├── trash_test.dart: 9
 ├── interstitial_ad_test.dart: 6
-├── rewarded_ad_service_test.dart: 3
-├── paywall_sheet_test.dart: 4
+├── rewarded_ad_service_test.dart: 4 (incl. H2 no-ad → unavailable)
+├── paywall_sheet_test.dart: 4 (H2 retry dialog)
 ├── share_service_test.dart: 4 (plan5 §1.7 Undo target)
 ├── quick_share_undo_test.dart: 3 (plan5 §1.7 snackbar UI)
+├── share_target_dialog_test.dart: 5 (plan6 H5 dialog)
+├── restore_rollback_test.dart: 2 (plan6 H6 rollback)
 └── widget_test.dart: 1
 ```
 

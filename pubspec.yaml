@@ -28,6 +28,9 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  # plan6 H6: restore-rollback test mocks PathProviderPlatform so the
+  # SnapshotManager can write safety snapshots under a temp dir.
+  path_provider_platform_interface: ^2.1.2
 
 flutter:
   uses-material-design: true

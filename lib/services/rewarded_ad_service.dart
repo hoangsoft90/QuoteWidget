@@ -4,6 +4,21 @@ import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'ad_config.dart';
 import 'iap_service.dart';
 
+/// Outcome of a rewarded-ad session (plan6 H2). Lets the UI distinguish a
+/// completed grant from a user dismissal from "no ad available" (load
+/// error / no-fill / show error / timeout) — the latter gets a retry dialog
+/// instead of a silent dead-end.
+enum RewardedAdResult {
+  /// User watched the ad to the end AND the 24h Pro unlock was persisted.
+  granted,
+
+  /// Ad was dismissed before earning the reward.
+  dismissed,
+
+  /// No ad could be shown: load failed, no-fill, show error, or timeout.
+  unavailable,
+}
+
 /// Rewarded-ad service — the PRIMARY monetization path.
 ///
 /// A rewarded ad is loaded when the app starts ([loadRewardedAd]) and
@@ -59,19 +74,21 @@ class RewardedAdService {
 
   /// Show the loaded rewarded ad.
   ///
-  /// Returns `true` if the user watched the ad to completion and the reward
-  /// was granted (i.e. Pro was unlocked for 24h), `false` otherwise
-  /// (no ad loaded, ad dismissed early, load error).
-  Future<bool> showRewardedAd() async {
+  /// Returns [RewardedAdResult.granted] only when the user watched the ad to
+  /// completion AND the 24h Pro unlock was persisted; [RewardedAdResult.dismissed]
+  /// when the user left before the reward; [RewardedAdResult.unavailable] when
+  /// no ad could be shown (load error / no-fill / show error / timeout) — the
+  /// UI surfaces the latter with a retry dialog (plan6 H2).
+  Future<RewardedAdResult> showRewardedAd() async {
     var ad = _rewardedAd;
     if (ad == null) {
       // No ad ready — try to load once, then give up for this tap.
       await loadRewardedAd();
       ad = _rewardedAd;
-      if (ad == null) return false;
+      if (ad == null) return RewardedAdResult.unavailable;
     }
 
-    final completer = Completer<bool>();
+    final completer = Completer<RewardedAdResult>();
     var rewardGranted = false;
     final currentAd = ad;
 
@@ -80,16 +97,21 @@ class RewardedAdService {
         ad.dispose();
         _rewardedAd = null;
         // Await the persisted 24h unlock BEFORE reporting success so a
-        // completed ad never returns true while the grant is still in memory.
+        // completed ad never returns granted while the grant is in memory.
         final outcome = await resolveRewardOutcome(rewardGranted);
-        if (!completer.isCompleted) completer.complete(outcome);
+        if (!completer.isCompleted) {
+          completer.complete(
+              outcome ? RewardedAdResult.granted : RewardedAdResult.dismissed);
+        }
         // Reload a fresh ad for the next request.
         loadRewardedAd();
       },
       onAdFailedToShowFullScreenContent: (ad, error) {
         ad.dispose();
         _rewardedAd = null;
-        if (!completer.isCompleted) completer.complete(false);
+        if (!completer.isCompleted) {
+          completer.complete(RewardedAdResult.unavailable);
+        }
         loadRewardedAd();
       },
     );
@@ -108,8 +130,9 @@ class RewardedAdService {
       onTimeout: () async {
         // Dismissal never arrived (plugin hiccup). If a reward was earned,
         // still persist the grant so the user is not penalized; otherwise the
-        // outcome is false. Never reports true without a persisted unlock.
-        return resolveRewardOutcome(rewardGranted);
+        // outcome is unavailable — we cannot confirm the ad finished.
+        final outcome = await resolveRewardOutcome(rewardGranted);
+        return outcome ? RewardedAdResult.granted : RewardedAdResult.unavailable;
       },
     );
   }

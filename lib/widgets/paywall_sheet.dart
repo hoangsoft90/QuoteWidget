@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../services/iap_service.dart';
 import '../services/rewarded_ad_service.dart';
+import 'ad_unavailable_dialog.dart';
 
 /// Result of the paywall sheet.
 enum PaywallResult {
@@ -67,8 +68,22 @@ Future<PaywallResult> showPaywallSheet(
 
   final messenger = ScaffoldMessenger.of(context);
   if (action == 'ad') {
-    final rewarded = await rewardedAdService.showRewardedAd();
-    if (rewarded && iapService.isPro) {
+    var result = await rewardedAdService.showRewardedAd();
+    // plan6 H2: no ad available (load error / no-fill / show error / timeout)
+    // → retry dialog instead of a silent dead-end. Loop until the user
+    // succeeds, dismisses the ad early, or cancels the dialog.
+    while (result == RewardedAdResult.unavailable) {
+      if (!context.mounted) return PaywallResult.cancelled;
+      final retry = await showAdUnavailableDialog(context);
+      if (!retry) {
+        messenger.showSnackBar(
+          const SnackBar(content: Text('Ad not finished. Please try again.')),
+        );
+        return PaywallResult.cancelled;
+      }
+      result = await rewardedAdService.showRewardedAd();
+    }
+    if (result == RewardedAdResult.granted && iapService.isPro) {
       messenger.showSnackBar(
         const SnackBar(content: Text('Pro unlocked for 24h!')),
       );
