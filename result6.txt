@@ -1,219 +1,198 @@
 ================================================================================
-PROMPT A+B — FIX 2 GAP CUỐI + CHECKLIST TEST THIẾT BỊ THẬT
+PROMPT: Device QA Gate (Phase 4 — prompt_device_qa.md)
 ================================================================================
-Ngày: 2026-09-02
-Trạng thái: ✅ ĐÃ FIX HOÀN TOÀN + TEST PASSED (44/44)
-
-================================================================================
-PHẦN A — FIX TRƯỚC KHI TEST THIẾT BỊ
-================================================================================
-
---- A1. Collection rỗng vẫn là dead-end khi tap ---
-
-BUG:
-  Trạng thái "Collection rỗng" (text="") dùng PendingIntent.getBroadcast()
-  → handleTap() khi tap. handleTap() không làm gì vì totalItems=0 → dead-end.
-
-FIX: 3-way branching trong updateAppWidget():
-
-  if (collectionId.isEmpty() || isRemoved) {
-      // Unconfigured / removed → open app → WidgetSetupScreen (pick collection)
-      → PendingIntent.getActivity()
-      → Extras: appWidgetId
-
-  } else if (text.isEmpty()) {
-      // Collection configured but empty → open app → add items
-      → PendingIntent.getActivity()
-      → Extras: appWidgetId + collectionId
-
-  } else {
-      // Configured widget with content → cycle (internal broadcast)
-      → PendingIntent.getBroadcast()
-      → Extras: widget_id
-  }
-
-Flutter routing:
-  - main.dart reads tapped_widget_id + tapped_collection_id từ SharedPreferences
-  - WidgetSetupScreen nhận optional collectionId
-  - Nếu collectionId có → auto-create WidgetConfig → navigate CollectionDetailScreen
-  - Nếu collectionId null → hiện collection picker (first-time setup)
-
-Files sửa:
-  - QuoteWidgetProvider.kt: 3-way PendingIntent branching
-  - main.dart: đọc tapped_collection_id, pass vào QuoteWidgetApp
-  - widget_setup_screen.dart: accept collectionId, auto-save + navigate to detail
-
---- A2. Warm-start: deep link có thể không hoạt động nếu app đã chạy sẵn ---
-
-BUG:
-  main.dart đọc tapped_widget_id lúc Flutter engine khởi động (cold start).
-  Nếu app đang chạy background → Activity lên foreground nhưng KHÔNG chạy
-  lại main() → deep link bị mất.
-
-FIX: Dual-layer approach
-
-Layer 1 — MainActivity.onNewIntent() (Kotlin):
-  override fun onNewIntent(intent: Intent) {
-      super.onNewIntent(intent)
-      setIntent(intent) // Bắt buộc trên Android
-      // Ghi tapped_widget_id + tapped_collection_id vào SharedPreferences
-      // để Flutter đọc khi resume
-  }
-
-Layer 2 — WidgetsBindingObserver (Flutter):
-  class _QuoteWidgetAppState ... with WidgetsBindingObserver {
-      @override
-      void didChangeAppLifecycleState(AppLifecycleState state) {
-          if (state == AppLifecycleState.resumed) {
-              _checkPendingWidgetTap(); // Đọc SharedPreferences
-          }
-      }
-  }
-
-Flow warm-start:
-  1. User tap widget (app đang background)
-  2. Android gọi onNewIntent() → ghi tapped_widget_id vào SharedPreferences
-  3. Android đưa Activity lên foreground
-  4. Flutter resume → didChangeAppLifecycleState(resumed) fires
-  5. _checkPendingWidgetTap() đọc SharedPreferences → tìm thấy tapped_widget_id
-  6. Navigate tới WidgetSetupScreen
-
-Tại sao dùng fallback thay vì MethodChannel:
-  MethodChannel yêu cầu Flutter engine sẵn sàng khi onNewIntent() fires.
-  Với FLAG_ACTIVITY_CLEAR_TOP, Activity có thể resume trước khi engine
-  khởi động xong. SharedPreferences + lifecycle observer đơn giản hơn
-  và đáng tin cậy hơn.
-
-Files sửa:
-  - MainActivity.kt: thêm onNewIntent() override
-  - main.dart: thêm WidgetsBindingObserver + _checkPendingWidgetTap()
+Ngày: 2026-09-05
+Trạng thái: ✅ PHẦN AGENT DONE — verdict BLOCKED (chờ human tester Wave 1)
 
 ================================================================================
-PHẦN A — TEST CASES (mô tả code flow)
+1. PREFILIGHT — PASS
 ================================================================================
 
-Test 1: Widget mới chưa cấu hình → tap → cold start
-  - QuoteWidgetProvider: collectionId="" → getActivity()
-  - Intent extras: appWidgetId=42
-  - SharedPreferences: tapped_widget_id="42"
-  - main.dart: reads tapped_widget_id=42 → WidgetSetupScreen(appWidgetId: 42)
-  - User chọn collection → WidgetConfig created → widget updates
-  Expected: WidgetSetupScreen hiển thị danh sách collection ✅
+  flutter analyze:  No issues found (0 error, 0 warning)
+  flutter test:     138/138 All tests passed
+  Dead code check:  source/ không tồn tại
+                    widget_config_screen.dart : không tồn tại (deleted)
+                    widget_preview.dart       : không tồn tại (deleted)
+                    refs trong lib/:           0 (grep rỗng)
 
-Test 2: Widget collection rỗng → tap → cold start
-  - QuoteWidgetProvider: collectionId="abc", text="" → getActivity()
-  - Intent extras: appWidgetId=42, collectionId="abc"
-  - SharedPreferences: tapped_widget_id="42", tapped_collection_id="abc"
-  - main.dart: reads both → WidgetSetupScreen(appWidgetId:42, collectionId:"abc")
-  - WidgetSetupScreen: auto-save → navigate CollectionDetailScreen(collection:"abc")
-  Expected: Mở đúng CollectionDetailScreen, KHÔNG phải collection picker ✅
-
-Test 3: Widget đã cấu hình → tap → still handleTap()
-  - QuoteWidgetProvider: collectionId="abc", text="Hello" → getBroadcast()
-  - Intent action: "com.quotewidget.WIDGET_TAP", widget_id=42
-  - handleTap(): currentIndex++ → update SharedPreferences → refresh widget
-  Expected: Widget cycle sang item tiếp theo, KHÔNG mở app ✅
-
-Test 4: Widget collection removed → tap → cold start
-  - QuoteWidgetProvider: status="removed" → getActivity()
-  - Intent extras: appWidgetId=42
-  - SharedPreferences: tapped_widget_id="42" (no collectionId)
-  - WidgetSetupScreen: collectionId=null → collection picker
-  Expected: Hiện danh sách collection để chọn lại ✅
-
-Test 5: Warm-start — app đang chạy, tap widget
-  - App ở HomeScreen, widget tapped
-  - Android: onNewIntent() → ghi tapped_widget_id vào SharedPreferences
-  - Flutter: resume → _checkPendingWidgetTap() → tìm thấy tapped_widget_id
-  - Navigator.push → WidgetSetupScreen
-  Expected: Điều hướng đúng ngay lập tức, KHÔNG cần đóng/mở app ✅
+  baseline trước session: analyze 0 + 138 test.
+  Không có test nào loại bỏ trong session này — số lượng giữ nguyên 138.
 
 ================================================================================
-UPDATED PENDINGINTENT SUMMARY TABLE
+2. BLOCKER GẤP — CI CHỈ BUILD TEST ADS, KHÔNG CÓ PRODUCTION ADS BUILD
 ================================================================================
 
-| Trạng thái widget                    | Display text                                    | PendingIntent  | Target                           | Extras                    |
-|--------------------------------------|-------------------------------------------------|----------------|----------------------------------|---------------------------|
-| Chưa cấu hình (collectionId="")      | "Tap to set up this widget"                     | getActivity()  | App → WidgetSetupScreen          | appWidgetId               |
-| Collection bị xoá (status="removed") | "Collection removed. Tap to choose another."    | getActivity()  | App → WidgetSetupScreen          | appWidgetId               |
-| Collection rỗng (text="")            | "Add some content to this collection."          | getActivity()  | App → WidgetSetupScreen → Detail | appWidgetId + collectionId|
-| Đang hiển thị nội dung               | [nội dung item hiện tại]                        | getBroadcast() | handleTap() (cycle)              | widget_id                 |
-| Free tier >1 widget                  | "Upgrade to Pro to add more widgets"            | getActivity()  | App → Settings/Pro               | appWidgetId               |
+  Mục đích: MUST case C1/H1 yêu cầu TEST_ADS=false (production ad units).
+  Project rule cấm build local → phải có build production ads trên GH Actions.
 
-3/5 trạng thái dùng getActivity() (mở app).
-Chỉ "content cycling" và "upgrade prompt" dùng internal mechanisms.
+  Fix: add workflow_dispatch input test_ads (default true) vào
+       .github/workflows/build-debug-apk.yml
 
-================================================================================
-PHẦN B — CHECKLIST TEST THIẾT BỊ THẬT
-================================================================================
+  Release stepchanged thành:
+    flutter build apk --release --no-pub \
+      --dart-define=TEST_ADS=${{ inputs.test_ads || 'true' }}
 
-KHÔNG THỂ THỰC HIỆN TRONG MÔI TRƯỜNG HIỆN TẠI.
-Cần build APK + chạy trên thiết bị Android thật hoặc emulator.
+  - Push build → giữ nguyên test ads (fallback true).
+  - Dispatch test_ads=false → QA candidate với production units.
 
-Yêu cầu để build:
-  flutter build apk --release
-  Output: build/app/outputs/flutter-apk/app-release.apk
-
-Yêu cầu để test:
-  - Device Android thật (API 24+) hoặc emulator
-  - Firebase Test Lab (Ưu tiên — phủ nhiều OEM)
-  - 21 test cases B1+B2+B3 cần chạy tay trên thiết bị
-
-Tất cả 21 test cases đều yêu cầu tương tác vật lý:
-  - Tap widget (không thể unit test)
-  - Drag widget từ system picker (không thể mô phỏng)
-  - Force-stop app (cần device thật)
-  - Reboot thiết bị (cần device thật)
-  - IAP sandbox test (cần device thật)
+  Commit: dbd4481
+  File:   .github/workflows/build-debug-apk.yml (workflow_dispatch + dart-define)
 
 ================================================================================
-DANH SÁCH FILE ĐÃ SỬA/THÊM TRONG ROUND NÀY
+3. QA CANDIDATE BUILD — GREEN
 ================================================================================
 
-Kotlin:
-  QuoteWidgetProvider.kt
-    + 3-way PendingIntent branching (empty/removed/content)
-    + extras["collectionId"] cho empty collection case
-  MainActivity.kt
-    + onNewIntent() override
-    + Writes tapped_widget_id + tapped_collection_id to SharedPreferences
+  Workflow dispatch với test_ads=false:
+    run ID:    33972687792
+    commit:    dbd4481
+    status:    success
+    conclusion: success
 
-Dart:
-  main.dart
-    + Đọc tapped_collection_id từ SharedPreferences
-    + Pass tappedCollectionId vào QuoteWidgetApp
-    + WidgetsBindingObserver mixin
-    + _checkPendingWidgetTap() fallback cho warm-start
-  widget_setup_screen.dart
-    + Accept optional collectionId parameter
-    + Auto-save + navigate to CollectionDetailScreen khi collectionId có
-    + Import collection_detail_screen.dart
+  Steps (tất cả xanh):
+    Set up job ✅
+    Checkout code ✅
+    Set up Java 17 ✅
+    Set up Flutter ✅
+    Flutter & Dart versions ✅
+    Install dependencies ✅
+    Analyze ✅
+    Run tests ✅
+    Build debug APK ✅
+    Show build output ✅
+    Fail if build failed ✅ (skipped — success)
+    Upload build log ✅
+    Upload APK artifact ✅
+    Build release APK ✅
+    Show release build output ✅
+    Fail if release build failed ✅ (skipped — success)
+    Upload release APK ✅
 
-Tổng: 4 files sửa, 1 file mới (widget_setup_screen.dart từ round trước),
-44 tests, 0 errors, 0 warnings
+  Artifact: release-apk — 30662801 bytes (~30.6 MB), không expired
+  (đồng thời có debug-apk 91.7 MB, build-log 1.0 KB)
+
+  TEST_ADS=false → ad units thật trong build:
+    banner     : ca-app-pub-6917313063209470/1409128007
+    interstitial: ca-app-pub-6917313063209470/1569899782
+    rewarded   : ca-app-pub-6917313063209470/7613467914
+
+  Bản chất case C1/H1: build này chứa unit thật, khác sample
+  ca-app-pub-3940256099942544/... — đúng expectation khi khời chạy.
 
 ================================================================================
-TỔNG KẾT 6 VÒNG REVIEW/FIX
+4. RUN SHEET — TẠO XONG (.plan/device_qa_run_sheet.md)
 ================================================================================
 
-| Vòng | Vấn đề chính                              | Files sửa |
-|------|--------------------------------------------|-----------|
-| C1-C5| totalItems, Dropdown, package name,        | ~15 files |
-|      | snapshot, IAP, privacy                     |           |
-| H1-H5| Progress indicator, onboarding,            | ~10 files |
-|      | sample content, share sheet, limit         |           |
-| M1-M5| name[0] crash, sentinel, progress,         | ~5 files  |
-|      | widget_loading, unit tests                 |           |
-| H2   | Widget limit gap analysis +                | ~5 files  |
-|      | SharedPreferences bridge fix               |           |
-| Deep | onDeleted, Pro auto-configure,             | ~5 files  |
-| Link | PendingIntent deep link                    |           |
-| A+B  | Empty collection fix, warm-start,          | ~5 files  |
-|      | PendingIntent table update                 |           |
+  File (gitignored, chỉ local):
+    .plan/device_qa_run_sheet.md
 
-Tổng cộng: ~35 files đã sửa/thêm qua 6 vòng
-44/44 tests pass
-0 errors, 0 warnings
-Sẵn sàng build APK + test thiết bị thật.
+  Metadata bảng:
+    Version:           1.0.0+1 (pubspec)
+    Commit:            dbd4481 (main)
+    Build date:        2026-09-05
+    Build type:        Release APK, debug-signed bởi CI
+    CI run (QA):       33972687792, success
+    TEST_ADS:          false
+    Artifact:         release-apk (30.6 MB)
+    Local build:       None (rule project)
 
+  MUST cases (ghi rõ):
+    Wave 1:  A1–A6
+    Wave 2:  B1–B3
+    Wave 3:  C1–C4
+    Wave 4:  D1–D2, E1–E4
+    Wave 5:  F1–F5 (F4 shuffle bag + F5 daily → MUST vì đã ship Phase 2B),
+             G1–G2
+    Wave 6:  H1–H2
+    SHOULD:  I1–I5
+
+  Mỗi case có:
+    Pre | Steps | Expected | ☐ PASS/FAIL/N/A | Notes | Triage if FAIL (file nghi ngờ)
+
+  Triage hints chọn file thực tế codebase:
+    A2, A3, A4, A5, B1, B2, C1, C2, C3, D1, E1, E2, E3, E4,
+    F1, F2, F3, F4, F5, G1, G2, H1, H2 — mỗi case có file suspect.
+
+================================================================================
+5. DOCS SYNC — features_final.md UPDATED
+================================================================================
+
+  Trước session: nhiều feature Phase 1-2B vẫn khắc "⚠️ Partial".
+  Sau session: đồng bộ trạng thái theo code thực tế (grep verification).
+
+  Feature ship (đánh dấu ✅):
+    Phase 2A: Favorites, Favorites-only (contentFilter), Search,
+              Duplicate Collection, Templates/Empty-state
+    Phase 2B: Shuffle Bag, Daily rotation, Auto-rotate (1h/3h/6h),
+              Tap action (next/open_collection/open_app/copy),
+              Responsive 4×2, Quick Share remember last collection
+
+  Deferred (🚫, ghi rõ để tránh claim ảo):
+    Export collection JSON/CSV, App shortcuts, Material You,
+    TXT/clipboard import entry
+
+  Dead code (✅):
+    widget_config_screen.dart: deleted
+    processShareText / ShareResult: deleted
+    legacy source/ tree: deleted (canonical = root)
+
+  Backup semantics (✅):
+    export: widgetConfigs: [] (không kèm config active)
+    import: drop mọi widgetConfigs (const []) — không tạo phantom config
+
+  Reconciliation (✅):
+    reconcileWidgetConfigs() full 2-way scan mỗi lần — bỏ early-return fast path
+    cleanupOrphanWidgetMappings: merged vào reconcile
+
+================================================================================
+6. WORKING LOG
+================================================================================
+
+  Đã cập nhật working.md:
+    [2026-09-05] prompt_device_qa — Phase 4 Device QA prep
+      - Preflight PASS: analyze 0, 138 tests, dead code gone
+      - CI: workflow_dispatch test_ads input, commit dbd4481
+      - QA candidate build 33972687792 = success, TEST_ADS=false
+      - Run sheet: .plan/device_qa_run_sheet.md
+      - Docs: features_final.md sync (Phase 1-2B shipped)
+      - openspec: device-qa-gate (proposal + tasks)
+
+================================================================================
+7. ĐANG DỠE — CHỜ HUMAN TESTER
+================================================================================
+
+  Verdict:  BLOCKED
+  Lý do:    Agent không có thiết bị thật → không thể run waves.
+            Tất cả cues trong run sheet đang ☐ unchecked.
+
+  Next step (human):
+    1. Tải app-release.apk từ CI run 33972687792
+    2. Cài trên Device A (stock/Pixel) — ghi model + Android version
+    3. Chạy Wave 1 (A1 → A2 → A3 → A4 → A5) — hướng dẫn chi tiết trong
+       session 직전 (mỗi case có hướng dẫn từng bước UI thật).
+    4. Báo kết quả từng case → agent triage FAIL, fix blocker nếu có,
+       re-run affected case.
+    5. Sau A1–A5 pass → tiếp Wave 2–6 (theo run sheet).
+    6. Wave 3 C1/H1: chỉ chạy trên QA candidate build (TEST_ADS=false).
+
+================================================================================
+8. QUYẾT ĐỊNH / CÂU HỎI CẦN XEM XÉT TRƯỚC KHI DÒNG SỐ NEXT SESSION
+================================================================================
+
+  Q1: Tester có muốn mình tóm tắt lại hướng dẫn từng bước Wave 1
+      (A1–A5) vào file riêng, hay chỉ dùng run sheet hiện có?
+      (run sheet đã có đủ Preconditions/Steps/Expected + Triage.)
+
+  Q2: Cần mở rộng run sheet thêm các trường thời gian thực thi,
+      logcat snippet cố định, hay giữ nguyên cấu trúc checklist hiện tại?
+
+  Q3: Build QA candidate có cần thêm AAB artifact (cho Play Store upload
+      sau QA) không, hay chỉ cần APK để test device?
+
+Acknowledge:
+  - Chưa commit handoff file (nằm ngoài git track).
+  - run sheet (local .plan/) chưa commit — đúng thiết kế.
+  - features_final.md sync chưa push (đang chờ gộp vào commit docs).
+
+================================================================================
+END
 ================================================================================

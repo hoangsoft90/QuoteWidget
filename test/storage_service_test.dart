@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:quotewidget/models/collection_model.dart';
@@ -11,6 +12,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 void main() {
   late StorageService service;
   late Directory tempDir;
+  final testerBinding =
+      TestWidgetsFlutterBinding.ensureInitialized();
 
   setUpAll(() async {
     TestWidgetsFlutterBinding.ensureInitialized();
@@ -734,9 +737,7 @@ void main() {
       expect(service.getAllCollections().length, 1);
       expect(service.getAllCollections().first.name, 'New');
       expect(service.getAllItems().first.text, 'New item');
-    });
-
-    test('appendFromBackup skips duplicate IDs', () async {
+    });    test('appendFromBackup skips duplicate IDs', () async {
       final col = await service.createCollection('Existing');
       await service.createItem(collectionId: col.id, text: 'Original', order: 0);
 
@@ -753,6 +754,167 @@ void main() {
       expect(service.getAllCollections().length, 1);
       expect(service.getAllCollections().first.name, 'Existing'); // Not overwritten
       expect(service.getItemCountForCollection(col.id), 2); // New item added
+    });
+  });
+
+  group('A3: delete collection fully unbinds widgets (free-limit unstick)', () {
+    late Directory tempDir;
+    late StorageService svc;
+
+    setUp(() async {
+      SharedPreferences.setMockInitialValues({});
+      tempDir = await Directory.systemTemp.createTemp('unbind_test_');
+      svc = StorageService();
+      await svc.init(testPath: tempDir.path);
+    });
+
+    tearDown(() async {
+      await svc.clearAll();
+      await tempDir.delete(recursive: true);
+    });
+
+    test('unbindWidgetConfig removes mapping + registry id + Hive config',
+        () async {
+      // Free user's single physical widget, registered natively as id 42.
+      SharedPreferences.setMockInitialValues({
+        'configured_widget_ids': '42',
+        'flutter.configured_widget_ids': '42',
+      });
+      final col = await svc.createCollection('Col');
+      final config = await svc.createWidgetConfig(collectionId: col.id);
+      await WidgetDataBridge.registerWidgetMapping(
+        appWidgetId: 42,
+        configId: config.id,
+      );
+
+      await svc.unbindWidgetConfig(config.id);
+
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString('configured_widget_ids'), '',
+          reason: 'A3: registry must drop the id or the Free gate stays stuck');
+      expect(prefs.getString('flutter.configured_widget_ids'), '',
+          reason: 'flutter.-prefixed copy must stay in sync (Kotlin parity)');
+      expect(prefs.getString('wcfg_42_configId'), isNull);
+      expect(prefs.getString('wcfg_${config.id}_appWidgetId'), isNull);
+      expect(svc.getWidgetConfig(config.id), isNull);
+    });
+
+    test('A3 acceptance: delete collection → re-setup same widget, no upgrade',
+        () async {
+      // Free user, exactly 1 physical widget (native id 42) bound to the
+      // only collection. Deleting the collection must free the widget slot:
+      // setting up a DIFFERENT collection on the SAME widget must NOT throw
+      // WidgetLimitReachedException.
+      SharedPreferences.setMockInitialValues({
+        'configured_widget_ids': '42',
+        'flutter.configured_widget_ids': '42',
+      });
+      final colA = await svc.createCollection('A');
+      final config = await svc.createWidgetConfig(collectionId: colA.id);
+      await WidgetDataBridge.registerWidgetMapping(
+        appWidgetId: 42,
+        configId: config.id,
+      );
+
+      await svc.deleteCollection(colA.id);
+
+      // The physical widget slot is free again (registry empty).
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString('configured_widget_ids'), '',
+          reason: 'native id 42 must no longer count toward the Free limit');
+
+      // Simulate the user setting up collection B on the SAME widget 42:
+      // register the mapping as the Kotlin side would, then create the
+      // config — this is the exact call that hit "Upgrade to Pro" before.
+      final colB = await svc.createCollection('B');
+      await WidgetDataBridge.registerWidgetMapping(
+        appWidgetId: 42,
+        configId: 'pending',
+      );
+      final newConfig = await svc.createWidgetConfig(collectionId: colB.id);
+      await WidgetDataBridge.registerWidgetMapping(
+        appWidgetId: 42,
+        configId: newConfig.id,
+      );
+      await prefs.setString('configured_widget_ids', '42');
+      await prefs.setString('flutter.configured_widget_ids', '42');
+
+      expect(svc.getWidgetConfig(newConfig.id), isNotNull,
+          reason: 'WidgetLimitReachedException NOT thrown → no Upgrade prompt');
+    });
+
+    test('unbindWidgetConfig with no mapping still deletes the config',
+        () async {
+      final col = await svc.createCollection('Col');
+      final config = await svc.createWidgetConfig(collectionId: col.id);
+
+      await svc.unbindWidgetConfig(config.id);
+
+      expect(svc.getWidgetConfig(config.id), isNull);
+      // Registry was never touched (no mapping → nothing to unregister).
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString('configured_widget_ids'), isNull);
+    });
+  });
+
+  group('A6: reconcileAfterRestore detaches orphaned native widgets', () {
+    late Directory tempDir;
+    late StorageService svc;
+
+    setUp(() async {
+      SharedPreferences.setMockInitialValues({
+        'configured_widget_ids': '42',
+        'flutter.configured_widget_ids': '42',
+      });
+      tempDir = await Directory.systemTemp.createTemp('a6_restore_test_');
+      svc = StorageService();
+      await svc.init(testPath: tempDir.path);
+    });
+
+    tearDown(() async {
+      await svc.clearAll();
+      await tempDir.delete(recursive: true);
+    });
+
+    test('native widget with dead mapping is detached + registry emptied',
+        () async {
+      // Mock the NATIVE widget channel exactly as the Kotlin side answers on
+      // a real device: one physical widget (id 42) is configured.
+      const channel = MethodChannel('quotewidget/widgets');
+      testerBinding.defaultBinaryMessenger.setMockMethodCallHandler(
+        channel,
+        (call) async => call.method == 'getConfiguredWidgetIds'
+            ? <dynamic>[42]
+            : null,
+      );
+      addTearDown(() => testerBinding.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null));
+
+      // Pre-restore state: physical widget 42 is mapped to a config that a
+      // destructive restore is about to wipe from Hive.
+      final col = await svc.createCollection('Col');
+      final config = await svc.createWidgetConfig(collectionId: col.id);
+      await WidgetDataBridge.registerWidgetMapping(
+        appWidgetId: 42,
+        configId: config.id,
+      );
+      expect(svc.getAllWidgetConfigs(), hasLength(1));
+
+      // Destructive restore: everything in Hive is replaced; configs never
+      // come back (Phase 1 P0-3 semantics).
+      await svc.restoreFromBackup(
+        collections: [Collection(id: 'r1', name: 'Restored', createdAt: DateTime(2025))],
+        items: [],
+        widgetConfigs: const [],
+      );
+      await svc.reconcileAfterRestore();
+
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString('configured_widget_ids'), '',
+          reason: 'widget 42 config died in the restore → must not count');
+      expect(prefs.getString('wcfg_42_configId'), isNull,
+          reason: 'dead mapping must be cleaned immediately, not at resume');
+      expect(svc.getAllWidgetConfigs(), isEmpty);
     });
   });
 }

@@ -15,6 +15,10 @@ class Item extends HiveObject {
   /// Default false for Hive backward-compat (missing field → false).
   bool favorite;
 
+  /// B1: optional author line shown on the widget below the text.
+  /// Nullable + missing-field-tolerant read for Hive backward-compat.
+  String? author;
+
   Item({
     required this.id,
     required this.collectionId,
@@ -24,12 +28,14 @@ class Item extends HiveObject {
     this.isDeleted = false,
     this.deletedAt,
     this.favorite = false,
+    this.author,
   });
 
   factory Item.create({
     required String collectionId,
     required String text,
     required int order,
+    String? author,
   }) {
     return Item(
       id: _generateId(),
@@ -37,6 +43,7 @@ class Item extends HiveObject {
       text: text,
       order: order,
       createdAt: DateTime.now(),
+      author: author,
     );
   }
 
@@ -59,6 +66,7 @@ class Item extends HiveObject {
       'isDeleted': isDeleted,
       'deletedAt': deletedAt?.toIso8601String(),
       'favorite': favorite,
+      'author': author,
     };
   }
 
@@ -74,6 +82,7 @@ class Item extends HiveObject {
           ? DateTime.tryParse(json['deletedAt'] as String)
           : null,
       favorite: json['favorite'] as bool? ?? false,
+      author: json['author'] as String?,
     );
   }
 }
@@ -98,12 +107,13 @@ class ItemAdapter extends TypeAdapter<Item> {
       isDeleted: fields[5] as bool? ?? false,
       deletedAt: fields[6] as DateTime?,
       favorite: fields[7] as bool? ?? false,
+      author: fields[8] as String?,
     );
   }
 
   @override
   void write(BinaryWriter writer, Item obj) {
-    writer.writeByte(8); // number of fields
+    writer.writeByte(9); // number of fields
     writer.writeByte(0);
     writer.write(obj.id);
     writer.writeByte(1);
@@ -120,6 +130,8 @@ class ItemAdapter extends TypeAdapter<Item> {
     writer.write(obj.deletedAt);
     writer.writeByte(7);
     writer.write(obj.favorite);
+    writer.writeByte(8);
+    writer.write(obj.author);
   }
 
   @override

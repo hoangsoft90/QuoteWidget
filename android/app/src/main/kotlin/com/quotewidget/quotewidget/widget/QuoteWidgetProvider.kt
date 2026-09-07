@@ -101,6 +101,7 @@ class QuoteWidgetProvider : AppWidgetProvider() {
                 .remove("${prefix}_collectionId")
                 .remove("${prefix}_currentIndex")
                 .remove("${prefix}_text")
+                .remove("${prefix}_author")
                 .remove("${prefix}_status")
                 .remove("${prefix}_totalItems")
                 .remove("${prefix}_rotationMode")
@@ -122,6 +123,7 @@ class QuoteWidgetProvider : AppWidgetProvider() {
                 .remove("flutter.${prefix}_collectionId")
                 .remove("flutter.${prefix}_currentIndex")
                 .remove("flutter.${prefix}_text")
+                .remove("flutter.${prefix}_author")
                 .remove("flutter.${prefix}_status")
                 .remove("flutter.${prefix}_totalItems")
                 .remove("flutter.${prefix}_rotationMode")
@@ -164,6 +166,65 @@ class QuoteWidgetProvider : AppWidgetProvider() {
         // Save updated configured IDs list to FlutterSharedPreferences
         flPrefs.edit().putString(KEY_CONFIGURED_WIDGETS, configuredIds.joinToString(",")).apply()
         flPrefs.edit().putString("flutter.$KEY_CONFIGURED_WIDGETS", configuredIds.joinToString(",")).apply()
+    }
+
+    /// A7: called by the system after widgets are restored from a device
+    /// backup. The restored SharedPreferences file still holds
+    /// `wcfg_<oldId>_configId` mappings and `widget_<oldId>_*` display data,
+    /// but old appWidgetIds no longer exist — the system remaps them to NEW
+    /// ids. Config data is device-bound, so: drop the old mapping, strip the
+    /// restored display data, empty the configured registry, and render the
+    /// "Tap to set up" state for every restored widget.
+    override fun onRestored(context: Context, oldWidgetIds: IntArray, newWidgetIds: IntArray) {
+        super.onRestored(context, oldWidgetIds, newWidgetIds)
+        val hwPrefs = getPrefs(context)
+        val flPrefs = getFlutterPrefs(context)
+
+        for ((index, oldId) in oldWidgetIds.withIndex()) {
+            // 1. Old mapping referenced an appWidgetId that no longer exists.
+            val wcfgKey = "wcfg_${oldId}_configId"
+            val configId = flPrefs.getString("flutter.$wcfgKey", null)
+                ?: flPrefs.getString(wcfgKey, null)
+            if (configId != null) {
+                val reverseKey = "wcfg_${configId}_appWidgetId"
+                flPrefs.edit()
+                    .remove("flutter.$wcfgKey")
+                    .remove(wcfgKey)
+                    .remove("flutter.$reverseKey")
+                    .remove(reverseKey)
+                    .apply()
+            }
+
+            // 2. Strip restored display data under the NEW id (same key list
+            //    as onDeleted) so the widget renders "Tap to set up".
+            val newId = newWidgetIds[index]
+            val prefix = "widget_$newId"
+            val editor = hwPrefs.edit()
+            for (key in listOf(
+                "collectionId", "currentIndex", "text", "author", "status",
+                "totalItems", "rotationMode", "items", "contentFilter",
+                "schedule", "tapAction", "shuffle_bag", "shuffle_index",
+                "shuffle_source_fp", "daily_date", "daily_index",
+                "next_rotation_at", "textColor", "backgroundColor",
+                "fontSize", "sizeCategory", "showProgress"
+            )) {
+                editor.remove("${prefix}_$key")
+            }
+            editor.apply()
+        }
+
+        // 3. Registry starts empty — restored widgets are unconfigured until
+        //    the user sets them up again (Free-limit gate stays accurate).
+        flPrefs.edit()
+            .putString(KEY_CONFIGURED_WIDGETS, "")
+            .putString("flutter.$KEY_CONFIGURED_WIDGETS", "")
+            .apply()
+
+        // 4. Render the fresh unconfigured state.
+        val manager = AppWidgetManager.getInstance(context)
+        for (newId in newWidgetIds) {
+            updateAppWidget(context, manager, newId)
+        }
     }
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -283,9 +344,13 @@ class QuoteWidgetProvider : AppWidgetProvider() {
 
         val isRemoved = status == "removed"
 
-        // Mark as configured if it has collection data
+        // Mark as configured if it has collection data. A3: no collection
+        // data anymore (collection deleted → display data wiped) →
+        // un-register the id so the Free-limit gate stops counting it.
         if (collectionId.isNotEmpty()) {
             saveConfiguredWidgetId(context, appWidgetId)
+        } else {
+            unsaveConfiguredWidgetId(context, appWidgetId)
         }
 
         // Phase 2A: favorites-only widget with zero favorites → clear hint
@@ -344,6 +409,18 @@ class QuoteWidgetProvider : AppWidgetProvider() {
             views.setTextViewText(R.id.widget_progress, progressText)
         } else {
             views.setViewVisibility(R.id.widget_progress, android.view.View.GONE)
+        }
+
+        // B1: optional author line — a single small grey line below the text,
+        // shown only when the author is set and the content state is live
+        // (hidden on unconfigured / removed / empty states).
+        val author = getString(context, "${prefix}_author")
+        if (author.isNotEmpty() && !isRemoved && collectionId.isNotEmpty() &&
+            text.isNotEmpty()) {
+            views.setViewVisibility(R.id.widget_author, android.view.View.VISIBLE)
+            views.setTextViewText(R.id.widget_author, "— $author")
+        } else {
+            views.setViewVisibility(R.id.widget_author, android.view.View.GONE)
         }
 
         // Set click intent — different behavior based on widget state
@@ -524,6 +601,22 @@ class QuoteWidgetProvider : AppWidgetProvider() {
         current.add(appWidgetId)
         val value = current.joinToString(",")
         // Write to FlutterSharedPreferences (supplementary data)
+        val flPrefs = getFlutterPrefs(context)
+        flPrefs.edit().putString(KEY_CONFIGURED_WIDGETS, value).apply()
+        flPrefs.edit().putString("flutter.$KEY_CONFIGURED_WIDGETS", value).apply()
+    }
+
+    /// A3: remove an appWidgetId from the configured registry — counterpart
+    /// of [saveConfiguredWidgetId]. Called from onUpdate when a widget renders
+    /// with NO collection data (its collection was deleted from the app): the
+    /// stale id must stop counting toward the Free-limit gate, otherwise a
+    /// Free user stays stuck on "Upgrade to Pro" for a widget they can no
+    /// longer configure. onUpdate previously only ever ADDED ids, so a stale
+    /// id was re-added on every render and survived forever.
+    private fun unsaveConfiguredWidgetId(context: Context, appWidgetId: Int) {
+        val current = getConfiguredWidgetIds(context)
+        if (!current.contains(appWidgetId)) return
+        val value = (current - appWidgetId).joinToString(",")
         val flPrefs = getFlutterPrefs(context)
         flPrefs.edit().putString(KEY_CONFIGURED_WIDGETS, value).apply()
         flPrefs.edit().putString("flutter.$KEY_CONFIGURED_WIDGETS", value).apply()

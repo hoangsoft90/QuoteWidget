@@ -13,6 +13,7 @@ import 'services/iap_service.dart';
 import 'services/interstitial_ad_service.dart';
 import 'services/rewarded_ad_service.dart';
 import 'services/toast_service.dart';
+import 'services/ump_consent_service.dart';
 import 'screens/home_screen.dart';
 import 'screens/onboarding_screen.dart';
 import 'screens/collection_picker_dialog.dart';
@@ -71,10 +72,23 @@ void main() async {
     proUnlockedUntil: iapService.proUnlockedUntil,
   );
 
-  // Init rewarded ads (primary monetization path)
+  // Check if first launch
+  final prefs = await SharedPreferences.getInstance();
+  final onboardingComplete = prefs.getBool('onboarding_complete') ?? false;
+
+  // A2 — UMP consent, run on EVERY app start BEFORE the Mobile Ads SDK
+  // initializes. On the very first launch the form is NOT shown during
+  // onboarding (user decision): gate the form behind onboardingComplete;
+  // HomeScreen re-runs this with the form allowed once onboarding finishes.
+  // All ad paths then read UmpConsentService.instance.canShowAds.
+  await UmpConsentService.instance
+      .ensureConsentResolved(showFormIfRequired: onboardingComplete);
+
+  // Init ads (primary monetization path) only AFTER consent is resolved —
+  // never initialize/load/show any ad before the consent state is known.
   final rewardedAdService = RewardedAdService(iapService);
   final interstitialAdController = InterstitialAdController();
-  if (AdConfig.supported) {
+  if (AdConfig.supported && UmpConsentService.instance.canShowAds) {
     try {
       await RewardedAdService.initMobileAds();
       await rewardedAdService.loadRewardedAd();
@@ -82,10 +96,6 @@ void main() async {
       // Ads unavailable (no Play Services / no network) — non-fatal.
     }
   }
-
-  // Check if first launch
-  final prefs = await SharedPreferences.getInstance();
-  final onboardingComplete = prefs.getBool('onboarding_complete') ?? false;
 
   // Check for pending share text
   final pendingShareText = prefs.getString('pending_share_text');

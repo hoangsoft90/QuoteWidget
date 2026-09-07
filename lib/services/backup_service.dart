@@ -157,6 +157,9 @@ class BackupService {
             // Never restore widget configs from a backup file (no phantom).
             widgetConfigs: const [],
           );
+          // A6: reconcile + refresh widgets immediately — every surviving
+          // native widget's mapping just went orphaned (Hive was wiped).
+          await _storageService.reconcileAfterRestore();
         } catch (e) {
           // Rollback on failure
           await _snapshotManager.restoreLatestSnapshot(_storageService);
@@ -173,6 +176,8 @@ class BackupService {
           // Never restore widget configs from a backup file (no phantom).
           widgetConfigs: const [],
         );
+        // A6: widgets may show stale content after new data lands — refresh.
+        await _storageService.reconcileAfterRestore();
       }
 
       return ImportResult(
@@ -190,6 +195,118 @@ class BackupService {
       );
     }
   }
+
+  // ==================== B2: single-collection export/import ====================
+
+  /// B2: export ONE collection + its items to a `.json` file (no
+  /// WidgetConfig — device-bound, same rule as full backups).
+  /// Returns the written file path.
+  Future<String> exportCollection(String collectionId) async {
+    final collection = _storageService.getCollection(collectionId);
+    if (collection == null) {
+      throw StateError('Collection not found');
+    }
+    final items = _storageService.getItemsForCollection(collectionId);
+
+    final payload = {
+      'backupFormat': 'quote-widget-collection',
+      'schemaVersion': 1,
+      'exportedAt': DateTime.now().toIso8601String(),
+      'collection': collection.toJson(),
+      'items': items.map((i) => i.toJson()).toList(),
+    };
+
+    final directory = await getTemporaryDirectory();
+    final timestamp =
+        DateTime.now().toIso8601String().replaceAll(':', '-').substring(0, 19);
+    final safeName = collection.name.replaceAll(RegExp(r'[^\w\- ]'), '').trim();
+    final file = File(
+        '${directory.path}/quotewidget-$safeName-$timestamp.json');
+    await file.writeAsString(jsonEncode(payload));
+    return file.path;
+  }
+
+  /// Parsed preview of a collection-export file (for the confirm step).
+  static Future<CollectionImportPreview> previewCollectionImport(
+      String filePath) async {
+    final file = File(filePath);
+    if (!await file.exists()) {
+      throw StateError('File not found');
+    }
+    final data = jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+    if (data['backupFormat'] != 'quote-widget-collection') {
+      throw FormatException('Not a collection export file');
+    }
+    final collection =
+        Collection.fromJson(data['collection'] as Map<String, dynamic>);
+    final items = (data['items'] as List)
+        .map((i) => Item.fromJson(i as Map<String, dynamic>))
+        .toList();
+    return CollectionImportPreview(collection: collection, items: items);
+  }
+
+  /// B2: import a collection-export file. Either create a NEW collection
+  /// from the file ([targetCollectionId] null — always gets a fresh id so a
+  /// same-named collection never collides), or append the items into an
+  /// EXISTING collection (new item ids — no overwrite of current content).
+  Future<ImportResult> importCollection({
+    required String filePath,
+    String? targetCollectionId,
+  }) async {
+    try {
+      final preview = await previewCollectionImport(filePath);
+
+      if (targetCollectionId == null) {
+        final created = await _storageService
+            .createCollection('${preview.collection.name} (imported)');
+        var order = 0;
+        for (final item in preview.items) {
+          await _storageService.createItem(
+            collectionId: created.id,
+            text: item.text,
+            order: order++,
+            author: item.author,
+          );
+        }
+        return ImportResult(
+          success: true,
+          message:
+              'Created "${created.name}" with ${preview.items.length} items',
+          collectionsImported: 1,
+          itemsImported: preview.items.length,
+        );
+      }
+
+      final target = _storageService.getCollection(targetCollectionId);
+      if (target == null) {
+        return ImportResult(
+            success: false, message: 'Target collection not found');
+      }
+      var order = _storageService.getItemCountForCollection(target.id);
+      for (final item in preview.items) {
+        await _storageService.createItem(
+          collectionId: target.id,
+          text: item.text,
+          order: order++,
+          author: item.author,
+        );
+      }
+      return ImportResult(
+        success: true,
+        message: 'Added ${preview.items.length} items to "${target.name}"',
+        itemsImported: preview.items.length,
+      );
+    } catch (e) {
+      return ImportResult(success: false, message: 'Import failed: $e');
+    }
+  }
+}
+
+/// B2: in-memory preview used by the confirm dialog before writing anything.
+class CollectionImportPreview {
+  final Collection collection;
+  final List<Item> items;
+  const CollectionImportPreview({required this.collection, required this.items});
 }
 
 class ImportResult {

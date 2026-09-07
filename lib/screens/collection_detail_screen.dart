@@ -1,21 +1,50 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart';
 import '../models/collection_model.dart';
 import '../models/item_model.dart';
 import '../models/widget_config_model.dart';
+import '../services/backup_service.dart';
+import '../services/snapshot_manager.dart';
 import '../services/storage_service.dart';
 import '../services/widget_service.dart';
 import 'bulk_add_screen.dart';
+import 'share_quote_card_screen.dart';
+
+/// A5a: the full reorder flow — persists the new order in Hive AND
+/// immediately re-syncs every widget bound to this collection (before the
+/// fix, the widget kept the old pool until an unrelated action re-synced it).
+/// Top-level so it can be tested without pumping the widget tree.
+Future<List<Item>> reorderAndSyncItems({
+  required StorageService storageService,
+  required WidgetService widgetService,
+  required String collectionId,
+  required List<Item> items,
+  required int fromIndex,
+  required int toIndex,
+}) async {
+  final item = items.removeAt(fromIndex);
+  items.insert(toIndex, item);
+
+  final itemIds = items.map((e) => e.id).toList();
+  await storageService.reorderItems(collectionId, itemIds);
+  await widgetService.updateWidgetsForCollection(collectionId);
+  return items;
+}
 
 class CollectionDetailScreen extends StatefulWidget {
   final Collection collection;
   final StorageService storageService;
   final WidgetService widgetService;
+  final SnapshotManager? snapshotManager;
 
   const CollectionDetailScreen({
     super.key,
     required this.collection,
     required this.storageService,
     required this.widgetService,
+    this.snapshotManager,
   });
 
   @override
@@ -75,25 +104,34 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
 
   void _showAddItemDialog() {
     final textController = TextEditingController();
+    final authorController = TextEditingController();
 
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Add Item'),
-        content: TextField(
-          controller: textController,
-          autofocus: true,
-          maxLines: 3,
-          decoration: const InputDecoration(
-            hintText: 'Enter text',
-            border: OutlineInputBorder(),
-          ),
-          onSubmitted: (value) {
-            if (value.trim().isNotEmpty) {
-              _addItem(value.trim());
-              Navigator.of(context).pop();
-            }
-          },
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: textController,
+              autofocus: true,
+              maxLines: 3,
+              decoration: const InputDecoration(
+                hintText: 'Enter text',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 8),
+            // B1: optional author — empty is fine.
+            TextField(
+              controller: authorController,
+              decoration: const InputDecoration(
+                hintText: 'Author (optional)',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
         ),
         actions: [
           TextButton(
@@ -103,7 +141,8 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
           TextButton(
             onPressed: () {
               if (textController.text.trim().isNotEmpty) {
-                _addItem(textController.text.trim());
+                _addItem(textController.text.trim(),
+                    author: authorController.text.trim());
                 Navigator.of(context).pop();
               }
             },
@@ -116,25 +155,34 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
 
   void _showEditItemDialog(Item item) {
     final textController = TextEditingController(text: item.text);
+    final authorController = TextEditingController(text: item.author);
 
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Edit Item'),
-        content: TextField(
-          controller: textController,
-          autofocus: true,
-          maxLines: 3,
-          decoration: const InputDecoration(
-            hintText: 'Enter text',
-            border: OutlineInputBorder(),
-          ),
-          onSubmitted: (value) {
-            if (value.trim().isNotEmpty) {
-              _updateItem(item.id, value.trim());
-              Navigator.of(context).pop();
-            }
-          },
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: textController,
+              autofocus: true,
+              maxLines: 3,
+              decoration: const InputDecoration(
+                hintText: 'Enter text',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 8),
+            // B1: optional author — empty clears it.
+            TextField(
+              controller: authorController,
+              decoration: const InputDecoration(
+                hintText: 'Author (optional)',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
         ),
         actions: [
           TextButton(
@@ -144,7 +192,8 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
           TextButton(
             onPressed: () {
               if (textController.text.trim().isNotEmpty) {
-                _updateItem(item.id, textController.text.trim());
+                _updateItem(item.id, textController.text.trim(),
+                    author: authorController.text.trim());
                 Navigator.of(context).pop();
               }
             },
@@ -179,7 +228,7 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
     );
   }
 
-  Future<void> _addItem(String text) async {
+  Future<void> _addItem(String text, {String? author}) async {
     final nextOrder = _items.isEmpty
         ? 0
         : _items.map((e) => e.order).reduce((a, b) => a > b ? a : b) + 1;
@@ -188,13 +237,14 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
       collectionId: widget.collection.id,
       text: text,
       order: nextOrder,
+      author: author,
     );
     _loadItems();
     _syncWidget();
   }
 
-  Future<void> _updateItem(String id, String text) async {
-    await widget.storageService.updateItem(id, text);
+  Future<void> _updateItem(String id, String text, {String? author}) async {
+    await widget.storageService.updateItem(id, text, author: author);
     _loadItems();
     _syncWidget();
   }
@@ -207,6 +257,105 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
 
   void _syncWidget() {
     widget.widgetService.updateWidgetsForCollection(widget.collection.id);
+  }
+
+  /// A5a: reorder handler — delegates to [reorderAndSyncItems] so the full
+  /// flow (Hive order write + immediate widget re-sync) is testable without
+  /// pumping the widget tree.
+  Future<void> handleReorder(int fromIndex, int toIndex) async {
+    final reordered = await reorderAndSyncItems(
+      storageService: widget.storageService,
+      widgetService: widget.widgetService,
+      collectionId: widget.collection.id,
+      items: _items,
+      fromIndex: fromIndex,
+      toIndex: toIndex,
+    );
+    if (mounted) setState(() => _items = reordered);
+  }
+
+  /// B2: shared BackupService handle for this screen's export/import.
+  BackupService get _backupService => BackupService(
+      widget.storageService, widget.snapshotManager ?? SnapshotManager());
+
+  /// B2: export THIS collection + its items as a shareable .json file.
+  Future<void> _exportCollection() async {
+    try {
+      final path = await _backupService.exportCollection(widget.collection.id);
+      await _backupService.shareBackup(path);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Collection exported')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Export failed: $e')),
+        );
+      }
+    }
+  }
+
+  /// B2: import items from a collection-export file — either a NEW collection
+  /// or appended into THIS one. One confirm step before anything is written.
+  Future<void> _importCollection() async {
+    try {
+      final picked = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['json'],
+      );
+      final filePath = picked?.files.single.path;
+      if (filePath == null) return;
+
+      final preview = await BackupService.previewCollectionImport(filePath);
+      if (!mounted) return;
+      final mode = await showDialog<String>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text('Import "${preview.collection.name}"?'),
+          content: Text(
+              'This file contains ${preview.items.length} item(s). Import as a new collection, or add them to "${widget.collection.name}"?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop('new'),
+              child: const Text('New collection'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop('append'),
+              child: const Text('Add here'),
+            ),
+          ],
+        ),
+      );
+      if (mode == null || !mounted) return;
+
+      final result = await _backupService.importCollection(
+        filePath: filePath,
+        targetCollectionId: mode == 'append' ? widget.collection.id : null,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(result.message),
+          backgroundColor: result.success ? Colors.green : Colors.red,
+        ),
+      );
+      if (result.success) {
+        _loadItems();
+        _syncWidget();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Import failed: $e')),
+        );
+      }
+    }
   }
 
   void _navigateToBulkAdd() {
@@ -287,6 +436,30 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
             icon: const Icon(Icons.add_to_photos),
             onPressed: _navigateToBulkAdd,
             tooltip: 'Bulk Add',
+          ),
+          // B2: single-collection export / import.
+          PopupMenuButton<String>(
+            tooltip: 'More',
+            onSelected: (value) {
+              if (value == 'export') _exportCollection();
+              if (value == 'import') _importCollection();
+            },
+            itemBuilder: (context) => const [
+              PopupMenuItem(
+                value: 'export',
+                child: ListTile(
+                  leading: Icon(Icons.ios_share),
+                  title: Text('Export collection'),
+                ),
+              ),
+              PopupMenuItem(
+                value: 'import',
+                child: ListTile(
+                  leading: Icon(Icons.download),
+                  title: Text('Import items'),
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -381,14 +554,7 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
       onReorderItem: (int fromIndex, int toIndex) {
         // onReorderItem already adjusts newIndex for the removed item — no
         // manual correction needed (unlike the deprecated onReorder).
-        final item = _items.removeAt(fromIndex);
-        _items.insert(toIndex, item);
-
-        // Update order values
-        final itemIds = _items.map((e) => e.id).toList();
-        widget.storageService.reorderItems(widget.collection.id, itemIds);
-
-        setState(() {});
+        unawaited(handleReorder(fromIndex, toIndex));
       },
       itemBuilder: (context, index) {
         final item = _items[index];
@@ -427,12 +593,26 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
                       _showEditItemDialog(item);
                     } else if (value == 'delete') {
                       _showDeleteItemConfirmation(item);
+                    } else if (value == 'shareImage') {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => ShareQuoteCardScreen(
+                            quoteText: item.text,
+                            author: item.author,
+                          ),
+                        ),
+                      );
                     }
                   },
                   itemBuilder: (context) => [
                     const PopupMenuItem(
                       value: 'edit',
                       child: Text('Edit'),
+                    ),
+                    const PopupMenuItem(
+                      value: 'shareImage',
+                      child: Text('Share as image'),
                     ),
                     const PopupMenuItem(
                       value: 'delete',

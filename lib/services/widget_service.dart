@@ -60,6 +60,13 @@ class WidgetService {
     await HomeWidget.saveWidgetData('${prefix}_rotationMode', config.rotationMode.name);
     await HomeWidget.saveWidgetData('${prefix}_totalItems', items.length.toString());
     await HomeWidget.saveWidgetData('${prefix}_text', text ?? '');
+    // B1: optional author line — taken from the DISPLAYED item (index may
+    // differ from config.currentIndex after a native tap), empty when unset.
+    final displayedAuthor =
+        (items.isNotEmpty && displayIndex >= 0 && displayIndex < items.length)
+            ? items[displayIndex].author
+            : null;
+    await HomeWidget.saveWidgetData('${prefix}_author', displayedAuthor ?? '');
     // Phase 2A: ordered text pool for index-based native rotation. Flattened
     // primitives (JSON list of strings) — allowed by plan 2B native-keys rule.
     await HomeWidget.saveWidgetData(
@@ -111,7 +118,16 @@ class WidgetService {
     await HomeWidget.saveWidgetData('${prefix}_textColor', config.appearance.textColor.toString());
     await HomeWidget.saveWidgetData('${prefix}_backgroundColor', config.appearance.background.toString());
     await HomeWidget.saveWidgetData('${prefix}_alignment', config.appearance.alignment.name);
-    await HomeWidget.saveWidgetData('${prefix}_sizeCategory', config.sizeCategory.name);
+    // A4: sizeCategory — NATIVE is source of truth. Kotlin persists the
+    // resize-derived layout (onAppWidgetOptionsChanged writes
+    // widget_<id>_sizeCategory into HomeWidgetPreferences). This sync must
+    // NOT clobber it (a resized 4×2 wide widget used to shrink back to the
+    // stale Hive value on the next item edit). Write Hive's value ONLY when
+    // no native value exists yet (first sync of a brand-new widget).
+    final nativeSize = await HomeWidget.getWidgetData<String>('${prefix}_sizeCategory');
+    if (nativeSize == null || nativeSize.isEmpty) {
+      await HomeWidget.saveWidgetData('${prefix}_sizeCategory', config.sizeCategory.name);
+    }
     await HomeWidget.saveWidgetData('${prefix}_showProgress', config.showProgress.toString());
 
     // Update all widget instances
@@ -185,15 +201,20 @@ class WidgetService {
         .toList();
 
     for (final config in configs) {
-      // Look up the real appWidgetId from the mapping
-      final appWidgetId = await WidgetDataBridge.getAppWidgetIdForConfig(config.id);
-      if (appWidgetId != null) {
-        await HomeWidget.saveWidgetData('widget_${appWidgetId}_status', 'removed');
+      try {
+        // Look up the real appWidgetId from the mapping
+        final appWidgetId = await WidgetDataBridge.getAppWidgetIdForConfig(config.id);
+        if (appWidgetId != null) {
+          await HomeWidget.saveWidgetData('widget_${appWidgetId}_status', 'removed');
+        }
+        await HomeWidget.updateWidget(
+          name: 'QuoteWidgetProvider',
+          androidName: 'QuoteWidgetProvider',
+        );
+      } catch (_) {
+        // A3 defensive: widget host unavailable (tests / no home screen) —
+        // the unbind in deleteCollection must still run after this.
       }
-      await HomeWidget.updateWidget(
-        name: 'QuoteWidgetProvider',
-        androidName: 'QuoteWidgetProvider',
-      );
     }
   }
 

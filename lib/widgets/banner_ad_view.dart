@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 
 import '../services/ad_config.dart';
+import '../services/ump_consent_service.dart';
 
 /// Anchored adaptive banner pinned to the bottom of the Home screen.
 /// Ads are always shown (Pro does NOT hide ads — user decision 2026-09-03).
@@ -63,8 +64,9 @@ class _BannerAdViewState extends State<BannerAdView> {
 
   @override
   Widget build(BuildContext context) {
-    // Unsupported platform / tests — never load ads.
-    if (!AdConfig.supported) {
+    // Unsupported platform / tests / consent not granted (A2) — never load ads.
+    // canShowAds is the cached UMP gate, resolved in main() before any UI.
+    if (!AdConfig.supported || !UmpConsentService.instance.canShowAds) {
       if (_banner != null) _disposeBanner();
       return const SizedBox.shrink();
     }

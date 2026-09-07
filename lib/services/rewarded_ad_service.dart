@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'ad_config.dart';
 import 'iap_service.dart';
+import 'ump_consent_service.dart';
 
 /// Outcome of a rewarded-ad session (plan6 H2). Lets the UI distinguish a
 /// completed grant from a user dismissal from "no ad available" (load
@@ -48,8 +49,14 @@ class RewardedAdService {
 
   /// Load a rewarded ad. Call on app open; re-call after each show.
   Future<void> loadRewardedAd() async {
-    // Skip in tests / when ads are disabled — never hit platform channels.
-    if (!AdConfig.supported || _isLoading || _rewardedAd != null) return;
+    // Skip in tests / when ads are disabled / no consent (A2) — never hit
+    // platform channels.
+    if (!AdConfig.supported ||
+        !UmpConsentService.instance.canShowAds ||
+        _isLoading ||
+        _rewardedAd != null) {
+      return;
+    }
 
     _isLoading = true;
     try {
@@ -80,11 +87,17 @@ class RewardedAdService {
   /// no ad could be shown (load error / no-fill / show error / timeout) — the
   /// UI surfaces the latter with a retry dialog (plan6 H2).
   Future<RewardedAdResult> showRewardedAd() async {
+    // A2: no ad may be shown without resolved consent — fail closed.
+    if (!AdConfig.supported || !UmpConsentService.instance.canShowAds) {
+      return RewardedAdResult.unavailable;
+    }
     var ad = _rewardedAd;
     if (ad == null) {
       // No ad ready — try to load once, then give up for this tap.
-      await loadRewardedAd();
-      ad = _rewardedAd;
+      if (AdConfig.supported) {
+        await loadRewardedAd();
+        ad = _rewardedAd;
+      }
       if (ad == null) return RewardedAdResult.unavailable;
     }
 

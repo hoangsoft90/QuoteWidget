@@ -1,6 +1,7 @@
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 
 import 'ad_config.dart';
+import 'ump_consent_service.dart';
 
 /// Pure decision — no platform channels, fully unit-testable.
 ///
@@ -37,7 +38,7 @@ class InterstitialAdController {
   /// Call after each successful destructive action (delete-forever,
   /// overwrite restore).
   void onDestructiveAction() {
-    if (!AdConfig.supported) return;
+    if (!AdConfig.supported || !UmpConsentService.instance.canShowAds) return;
     _actionCount++;
     if (shouldShowInterstitial(
       actionCount: _actionCount,
@@ -71,7 +72,11 @@ class InterstitialAdController {
   }
 
   void _load() {
-    if (_loading) return;
+    if (_loading ||
+        !AdConfig.supported ||
+        !UmpConsentService.instance.canShowAds) {
+      return;
+    }
     _loading = true;
     try {
       InterstitialAd.load(

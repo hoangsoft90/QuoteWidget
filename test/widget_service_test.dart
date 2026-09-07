@@ -3,10 +3,13 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:home_widget/home_widget.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:quotewidget/models/widget_config_model.dart';
+import 'package:quotewidget/screens/collection_detail_screen.dart';
 import 'package:quotewidget/services/rotation_service.dart';
 import 'package:quotewidget/services/storage_service.dart';
+import 'package:quotewidget/services/widget_data_bridge.dart';
 import 'package:quotewidget/services/widget_service.dart';
 
 /// plan5 Sprint 0 §1.6: `syncProStatus` (called once at app startup with the
@@ -29,6 +32,33 @@ void main() {
         .setMockMethodCallHandler(channel, (call) async {
       calls.add(call);
       return null;
+    });
+    addTearDown(() => TestDefaultBinaryMessengerBinding.instance
+        .defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, null));
+    return calls;
+  }
+
+  /// A4 helper: STATEFUL mock — saveWidgetData stores into a map,
+  /// getWidgetData reads it back. Lets a test seed the native display-data
+  /// file exactly as Kotlin would (resize, tap progress) before a sync.
+  List<MethodCall> mockStatefulHomeWidgetChannel() {
+    const channel = MethodChannel('home_widget');
+    final store = <String, Object?>{};
+    final calls = <MethodCall>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      calls.add(call);
+      final args = call.arguments as Map;
+      switch (call.method) {
+        case 'saveWidgetData':
+          store[args['id'] as String] = args['data'];
+          return true;
+        case 'getWidgetData':
+          return store[args['id'] as String];
+        default:
+          return null;
+      }
     });
     addTearDown(() => TestDefaultBinaryMessengerBinding.instance
         .defaultBinaryMessenger
@@ -327,4 +357,150 @@ void main() {
           reason: 'active Pro still renders fresh content after startup');
     });
   });
+
+  group('A4: sizeCategory — native resize value is never clobbered', () {
+    late Directory tempDir;
+    late StorageService storage;
+
+    setUp(() async {
+      SharedPreferences.setMockInitialValues({});
+      tempDir = await Directory.systemTemp.createTemp('a4_size_test_');
+      storage = StorageService();
+      await storage.init(testPath: tempDir.path);
+    });
+
+    tearDown(() async {
+      await storage.clearAll();
+      await tempDir.delete(recursive: true);
+    });
+
+    test('syncWidgetData does NOT overwrite an existing native sizeCategory',
+        () async {
+      // Kotlin onAppWidgetOptionsChanged persisted 'wide' (user resized the
+      // widget to 4×2). Hive still holds the stale default 'small'.
+      mockStatefulHomeWidgetChannel();
+      await HomeWidget.saveWidgetData('widget_21_sizeCategory', 'wide');
+
+      final col = await storage.createCollection('Col');
+      final config = await storage.createWidgetConfig(collectionId: col.id);
+      expect(config.sizeCategory, SizeCategory.small,
+          reason: 'Hive default — the stale value that used to win');
+
+      final service = WidgetService(storage);
+      await service.syncWidgetData(config, appWidgetId: 21); // item-edit sync
+
+      final stillWide =
+          await HomeWidget.getWidgetData<String>('widget_21_sizeCategory');
+      expect(stillWide, 'wide',
+          reason:
+              'A4: resize-derived native layout must survive a Flutter sync');
+    });
+
+    test('B1: author key follows the displayed item, empty when unset',
+        () async {
+      mockStatefulHomeWidgetChannel();
+
+      final col = await storage.createCollection('Col');
+      await storage.createItem(collectionId: col.id, text: 'A', order: 0,
+          author: 'Thoreau');
+      await storage.createItem(collectionId: col.id, text: 'B', order: 1);
+
+      final config = await storage.createWidgetConfig(collectionId: col.id);
+      final service = WidgetService(storage);
+
+      // Item 0 has author 'Thoreau' → key carries it.
+      await service.syncWidgetData(config, appWidgetId: 31);
+      expect(await HomeWidget.getWidgetData<String>('widget_31_author'),
+          'Thoreau');
+
+      // Native tap advanced to item 1 (no author) → key must be EMPTY (not
+      // stale 'Thoreau'), otherwise the widget would keep the old author.
+      await HomeWidget.saveWidgetData('widget_31_currentIndex', '1');
+      await service.syncWidgetData(config, appWidgetId: 31);
+      expect(await HomeWidget.getWidgetData<String>('widget_31_author'), '',
+          reason: 'author must follow the displayed item, never stay stale');
+    });
+
+    test('brand-new widget (no native value yet) gets the Hive default',
+        () async {
+      final calls = mockStatefulHomeWidgetChannel();
+
+      final col = await storage.createCollection('Col');
+      final config = await storage.createWidgetConfig(collectionId: col.id);
+
+      final service = WidgetService(storage);
+      await service.syncWidgetData(config, appWidgetId: 22);
+
+      final writes = calls
+          .where((c) =>
+              c.method == 'saveWidgetData' &&
+              (c.arguments as Map)['id'] == 'widget_22_sizeCategory')
+          .toList();
+      expect(writes, hasLength(1),
+          reason: 'first sync of a new widget must seed the layout');
+      expect((writes.single.arguments as Map)['data'], 'small');
+    });
+  });
+
+  group('A5a: reorder immediately re-syncs the widget pool', () {
+    late Directory tempDir;
+    late StorageService storage;
+
+    setUp(() async {
+      SharedPreferences.setMockInitialValues({});
+      tempDir = await Directory.systemTemp.createTemp('a5_reorder_test_');
+      storage = StorageService();
+      await storage.init(testPath: tempDir.path);
+    });
+
+    tearDown(() async {
+      await storage.clearAll();
+      await tempDir.delete(recursive: true);
+    });
+
+    test('reorder flow persists order AND re-syncs the widget pool', () async {
+      final calls = mockHomeWidgetChannel();
+
+      final col = await storage.createCollection('Col');
+      await storage.createItem(collectionId: col.id, text: 'A', order: 0);
+      await storage.createItem(collectionId: col.id, text: 'B', order: 1);
+      await storage.createItem(collectionId: col.id, text: 'C', order: 2);
+      final config = await storage.createWidgetConfig(collectionId: col.id);
+      await WidgetDataBridge.registerWidgetMapping(
+        appWidgetId: 7,
+        configId: config.id,
+      );
+
+      // The EXACT flow a drag fires (moved item 0 → index 1: A,B,C → B,A,C),
+      // awaited end-to-end.
+      await reorderAndSyncItems(
+        storageService: storage,
+        widgetService: WidgetService(storage),
+        collectionId: col.id,
+        items: storage.getItemsForCollection(col.id)..sort((a, b) => a.order.compareTo(b.order)),
+        fromIndex: 0,
+        toIndex: 1,
+      );
+
+      final pool = _lastSavedList(calls, 'widget_7_items');
+      expect(pool, isNotNull,
+          reason: 'reorder MUST re-sync the widget (A5a: no _syncWidget before)');
+      final items = (jsonDecode(pool!) as List).cast<String>();
+      expect(items, ['B', 'A', 'C'],
+          reason: 'widget pool must reflect the new order immediately');
+    });
+  });
+}
+
+/// Last saveWidgetData payload for [id] across all calls (sync writes several
+/// times — the last write is what Kotlin renders).
+String? _lastSavedList(List<MethodCall> calls, String id) {
+  String? value;
+  for (final call in calls) {
+    if (call.method == 'saveWidgetData' &&
+        (call.arguments as Map)['id'] == id) {
+      value = (call.arguments as Map)['data'] as String?;
+    }
+  }
+  return value;
 }

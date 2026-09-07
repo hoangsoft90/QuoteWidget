@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import '../models/collection_model.dart';
 import '../services/backup_service.dart';
@@ -8,6 +10,7 @@ import '../services/widget_service.dart';
 import '../services/iap_service.dart';
 import '../services/interstitial_ad_service.dart';
 import '../services/rewarded_ad_service.dart';
+import '../services/ump_consent_service.dart';
 import '../widgets/banner_ad_view.dart';
 import 'collection_detail_screen.dart';
 import 'settings_screen.dart';
@@ -44,6 +47,11 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _loadCollections();
+    // A2: HomeScreen is only reached once onboarding is complete — the
+    // consent form was suppressed during first-launch onboarding (main()
+    // gated it behind onboardingComplete), so resolve it now. No-op when
+    // consent was already handled on a previous launch.
+    unawaited(UmpConsentService.instance.ensureConsentResolved());
   }
 
   void _loadCollections() {

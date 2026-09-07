@@ -1,0 +1,128 @@
+================================================================================
+RESULT 7 — Feature Close Batch (prompt_feature_close_batch_final.md) — 2026-09-06
+================================================================================
+Agent: Buffy (Freebuff) · Project: Quote Widget (Flutter 3.47.1, Android-only)
+Prompt: A1→A9 → Gate A → B1→B5 → Gate B → Block C (evidence-only — không tin
+báo cáo bằng lời: mỗi mục PASS phải có dòng code + kết quả test).
+
+--------------------------------------------------------------------------------
+GATES (chạy thật, output nguyên văn)
+--------------------------------------------------------------------------------
+[Gate A] flutter analyze:  "No issues found! (ran in 2.8s)"
+        flutter test:      "All tests passed!"  — 145/145  (138 cũ + 7 mới)
+[Gate B] flutter analyze:  "No issues found! (ran in 3.3s)"
+        flutter test:      "All tests passed!"  — 155/155  (145 + 10 mới)
+[Final ] flutter analyze:  "No issues found! (ran in 2.7s)"  — sau toàn bộ thay đổi
+        flutter test:      "All tests passed!"  — 155/155
+
+--------------------------------------------------------------------------------
+BLOCK A — kết quả từng mục
+--------------------------------------------------------------------------------
+A1 Privacy root file ........................ PASS  — root privacy.html → note trỏ
+                                                  docs/privacy.html (canonical).
+                                                  settings_screen URL giữ nguyên.
+A2 UMP consent .............................. PASS  — ⚠️ VIẾT LẠI TOÀN BỘ: session
+                                                  trước dùng API TỰ CHẾ
+                                                  (ConsentInformation.instance(),
+                                                  canRequestAds property,
+                                                  AdRequest(consentInformation:))
+                                                  — KHÔNG tồn tại trong
+                                                  google_mobile_ads 9.0.0 → không
+                                                  compile. Đã rebuild đúng API thật
+                                                  (verify từ pub-cache source):
+                                                  UmpConsentService (file mới) +
+                                                  gate canShowAds vào 3 ad paths +
+                                                  Privacy Options Settings (chỉ khi
+                                                  Google yêu cầu) + onboarding gating.
+A3 Delete collection ↔ free-limit ........... PASS  — unbindWidgetConfig() (Hive +
+                                                  wcfg_* 2 chiều + configured_widget_ids
+                                                  cả 2 prefix + clear display data)
+                                                  + Kotlin unsaveConfiguredWidgetId()
+                                                  (onUpdate chỉ ADD trước đây).
+                                                  3 tests gồm acceptance: delete →
+                                                  setup lại cùng widget → KHÔNG
+                                                  WidgetLimitReachedException.
+A4 sizeCategory overwrite ................... PASS  — syncWidgetData chỉ ghi khi
+                                                  native chưa có value (Native là
+                                                  source of truth). 2 tests: native
+                                                  'wide' sống sót; widget mới seed
+                                                  đúng 1 lần.
+A5a Reorder sync ............................ PASS  — reorderAndSyncItems() top-level
+                                                  (reorder + updateWidgetsForCollection
+                                                  ngay). Test: pool ['B','A','C'] sau
+                                                  move 0→1.
+A5b Bulk Add defensive sync ................. PASS  — bulk_add_screen sync trước pop.
+A6 Restore → reconcile ngay ................. PASS  — reconcileAfterRestore() + shared
+                                                  releaseNativeWidget(); gọi sau
+                                                  import overwrite/append. 1 test
+                                                  (mock native channel → registry
+                                                  rỗng + mapping sạch ngay).
+A7 onRestored() ............................. PASS  — Kotlin override: xóa mapping cũ,
+                                                  strip display data, registry rỗng,
+                                                  render "Tap to set up".
+A8 Dead code + cleartext .................... PASS  — dead code sạch từ phase trước
+                                                  (grep 0 refs). Cleartext GIỮ —
+                                                  verdict + lý do (AdMob mediation
+                                                  HTTP creatives) ghi trong
+                                                  network_security_config.xml.
+A9 Tests cho A3/A4/A5a/A6 ................... PASS  — +7 tests (A3×3, A4×2, A5a×1, A6×1).
+
+--------------------------------------------------------------------------------
+BLOCK B — kết quả từng mục
+--------------------------------------------------------------------------------
+B1 Author (optional, tối giản) .............. PASS  — Item.author String? (Hive field 9
+                                                  backward-compat) + ô nhập optional +
+                                                  widget `widget_<id>_author` (theo item
+                                                  đang hiển thị) + Kotlin render
+                                                  `— author` (1 style, 3 layouts) +
+                                                  cleanup keys. 1 test (author theo
+                                                  displayed item, không stale).
+B2 Export/Import 1 collection JSON .......... PASS  — exportCollection/importCollection/
+                                                  previewCollectionImport + confirm
+                                                  dialog (New/Add here). 4 tests
+                                                  round-trip (author sống sót, append
+                                                  đúng order, reject file sai format).
+B3 Share quote as image ..................... PASS  — renderQuoteCardPng() (pure Canvas
+                                                  — deterministic, tránh toImage
+                                                  treo fake-async) + ShareQuoteCardScreen
+                                                  + entry item menu. 4 tests (PNG
+                                                  magic bytes thật).
+B4 Setup UI expose đủ engine ................ PASS  — VERIFIED, NO CODE CHANGE: UI
+                                                  iterate đủ RotationMode.values /
+                                                  ScheduleMode.values / TapAction.values
+                                                  + favoritesOnly toggle (widget_setup
+                                                  _screen.dart:320-375).
+B5 About version động ....................... PASS  — package_info_plus + _loadVersion().
+                                                  1 test (mock channel → v9.9.9 hiển thị).
+
+--------------------------------------------------------------------------------
+BLOCK C — docs
+--------------------------------------------------------------------------------
+C1 features_final.md ........................ PASS  — ⚠️→✅ cho các mục đã fix;
+                                                  §8 Deferred V1.1 (12 mục).
+C2 checklist.md + features.md ............... PASS  — đồng bộ code thật; freeze banner.
+C3 progress_feature_close.md ................ PASS  — file mới, PASS/FAIL + evidence.
+C4 FEATURE FREEZE ............................ PASS  — ghi trong progress/checklist/features.
+C5 Next-step reminder ....................... PASS  — Device QA Wave 1 (TEST_ADS=false).
+
+--------------------------------------------------------------------------------
+TỔNG KẾT SỐ LIỆU
+--------------------------------------------------------------------------------
+Tests:  138 (đầu session) → 145 (Gate A) → 155 (Gate B, cuối) — All passed.
+Analyze: 0 errors, 0 warnings (chạy cuối session sau mọi thay đổi).
+Test files mới: collection_export_import_test.dart (4),
+                share_quote_card_test.dart (4), about_version_test.dart (1).
+File lib mới:  lib/services/ump_consent_service.dart,
+               lib/screens/share_quote_card_screen.dart.
+Kotlin mới/sửa: QuoteWidgetProvider.kt (onRestored, unsaveConfiguredWidgetId,
+                author render, key cleanup) · widget_small/medium/wide.xml
+                (widget_author) · network_security_config.xml (comment verdict).
+pubspec: +package_info_plus ^9.0.1.
+Docs mới/sửa: .plan/progress_feature_close.md (mới) · .plan/features_final.md ·
+              checklist.md · features.md · handoff_20260906_163852.md (mới) ·
+              next.md · result7.txt (file này).
+
+⚠️ FEATURE FREEZE 2026-09-06 — chỉ nhận bugfix + Device QA tới CLOSED_TESTING_OK.
+▶ Bước tiếp theo: commit batch → dispatch CI test_ads=false → QA candidate mới →
+  chạy .plan/prompt_device_qa.md Wave 1 (QA candidate cũ 33972687792 CHƯA có batch này).
+================================================================================

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/backup_service.dart';
 import '../services/iap_service.dart';
@@ -6,6 +7,7 @@ import '../services/interstitial_ad_service.dart';
 import '../services/rewarded_ad_service.dart';
 import '../services/snapshot_manager.dart';
 import '../services/storage_service.dart';
+import '../services/ump_consent_service.dart';
 import '../services/widget_service.dart';
 import '../widgets/ad_unavailable_dialog.dart';
 import 'backup_screen.dart';
@@ -37,14 +39,44 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   bool _isWatchingAd = false;
+  bool _privacyOptionsRequired = false;
+  String _version = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _checkPrivacyOptions();
+    _loadVersion();
+  }
+
+  /// B5: About shows the live version from the package metadata instead of
+  /// a hardcoded string that drifts from pubspec.yaml on every release.
+  Future<void> _loadVersion() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      if (mounted) setState(() => _version = info.version);
+    }    catch (_) {
+      // Non-Android / test environment — leave empty, fall back below.
+    }
+  }
+
+  /// A2: the Privacy Options entry point is shown ONLY when Google's UMP
+  /// config requires one for this user (region/consent state).
+  Future<void> _checkPrivacyOptions() async {
+    final required =
+        await UmpConsentService.instance.isPrivacyOptionsRequired();
+    if (mounted && required != _privacyOptionsRequired) {
+      setState(() => _privacyOptionsRequired = required);
+    }
+  }
 
   Future<void> _watchAdToUnlock() async {
     if (_isWatchingAd) return;
     setState(() => _isWatchingAd = true);
     try {
-      // plan6 H2: loop with a retry dialog while no ad is available instead
-      // of a silent dead-end. granted → green success; dismissed early →
-      // orange try-again; unavailable + user cancels → same try-again snack.
+      // plan6 H2: retry dialog while no ad is available instead of a silent
+      // dead-end. granted → green success; dismissed early → orange try-again;
+      // unavailable + user cancels → same try-again snack.
       var result = await widget.rewardedAdService.showRewardedAd();
       while (result == RewardedAdResult.unavailable) {
         if (!mounted) return;
@@ -173,13 +205,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onTap: _openPrivacyPolicy,
           ),
 
+          // Privacy Options (UMP A2) — only when Google requires the entry
+          // point; lets the user review/withdraw ads consent at any time.
+          if (_privacyOptionsRequired) ...[
+            const Divider(),
+            ListTile(
+              leading: const Icon(Icons.shield_outlined),
+              title: const Text('Privacy Options'),
+              subtitle: const Text('Review or change your ads consent'),
+              onTap: () => UmpConsentService.instance.showPrivacyOptions(),
+            ),
+          ],
+
           const Divider(),
 
-          // About
+          // About — B5: version read live from PackageInfo.
           ListTile(
             leading: const Icon(Icons.info_outline),
             title: const Text('About'),
-            subtitle: const Text('Quote Widget – Your Words v1.0.0'),
+            subtitle: Text(_version.isEmpty
+                ? 'Quote Widget – Your Words'
+                : 'Quote Widget – Your Words v$_version'),
           ),
         ],
       ),

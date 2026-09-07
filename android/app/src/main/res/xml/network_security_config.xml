@@ -1,8 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Allows plain-http traffic for any domain. This is the robust Android way
-     to permit cleartext everywhere: unlike the app-level
-     android:usesCleartextTraffic attribute, a network security config is not
-     overridden by library manifests merged into the release APK. -->
+<!-- A8 review verdict: cleartext stays ON deliberately. The Google Mobile
+     Ads SDK documents that some ad/mediation networks still serve creatives
+     over HTTP — disabling cleartext would break ad rendering (the app's
+     primary monetization). Everything first-party (privacy policy, Sentry)
+     is HTTPS-only. Unlike the app-level android:usesCleartextTraffic
+     attribute, a network security config is not overridden by library
+     manifests merged into the release APK. -->
 <network-security-config>
     <base-config cleartextTrafficPermitted="true" />
 </network-security-config>

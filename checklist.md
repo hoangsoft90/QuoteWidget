@@ -73,51 +73,103 @@
 - [x] `docs/privacy.html` — hosted on GitHub Pages
 - [x] `.github/workflows/pages.yml` — auto-deploy on push
 
-### Plan6 bugfix (Sprint 0 hardening)
-- [x] **C1 startup reconciliation** — orphan `wcfg_*` mapping cleanup via `getConfigIdForWidget()` + Hive lookup (thay block so int-vs-UUID giả chết) — 4 tests
-- [x] **C4 rewarded real ID** — `ca-app-pub-6917313063209470/7613467914` (khác sample ID) — 2026-09-05
-- [x] **C5 dead code removed** — `widget_config_screen.dart` + `widget_preview.dart` xóa; CI `flutter analyze --fatal-warnings`; rule cấm `// ignore:` trần trong operating_rules.md
-- [x] **H2 rewarded no-fill** — `RewardedAdResult.unavailable` + dialog "Không có quảng cáo lúc này" + Retry (paywall + settings); test no-ad → unavailable
-- [x] **H5 share-target dialog** — 5 widget tests
-- [x] **H6 restore rollback** — 2 integration tests: snapshot trước clearAll, rollback về đúng trạng thái cũ
-- [x] **H1/H4** — rewarded-only giữ nguyên là chiến lược chính thức (docs); no hardcoded Pro=true in lib (chỉ legacy migration)
-- [x] Verified C2 (onDeleted wcfg cleanup) / C3 (native-count gate) / H3 (PREFS_VERSION) đã tồn tại từ Sprint A — không cần code mới
+### Phase 1–2B code quality (plan6 + phase1-correctness + phase2A/B)
+- [x] **Phase 1 P0-2 reconcile full 2-way scan** — bỏ early-return fast path; full scan mỗi lần native ids có → mapping gãy dù count bằng vẫn cleanup (storage_service.dart `reconcileWidgetConfigs`), 2 tests mới + đổi 1 test fast-path cũ
+- [x] **Phase 1 P0-3 backup no-phantom** — export `widgetConfigs: []`, import DROP mọi configs (const []), UI canonical copy; test phantom-restore
+- [x] **Phase 1 P0-4 dead code** — `processShareText`/`ShareResult`/`getShareMessage`/`_isUrlOnly` deleted + dead tests; bridge header comment sửa favprefs file
+- [x] **Phase 1 P0-5 release runbook** — ghi `--dart-define=TEST_ADS=false` vào operating_rules.md
+- [x] **Phase 1 P0-6 IAP reward-only** — verified: không có buyPro/removeAds UI, không in_app_purchase dep
+- [x] **Phase 1 P0-7 native onDeleted** — cleanup verified (đọc configId trước khi remove)
+- [x] **Phase 2A**: Favorites (Item.favorite + All/Favorites filter + storage method), Favs-only widget (contentFilter enum + JSON pool + Kotlin pick-by-index → cũng fix tap-to-cycle text bug), Search Collection Detail (realtime in-memory), Duplicate Collection (batch putAll), Templates/Empty-state (Home empty → 5 starter packs / Start empty)
+- [x] **Phase 2B**: Shuffle Bag (persist per widget, fingerprint invalidate), Daily rotation (daily_date/ daily_item_id/ daily_index/ next_rotation_at, local calendar, tap trong ngày không đốt daily slot), Auto-rotate (every_1h/3h/6h + daily), Tap action (next/open_collection/open_app/copy), Responsive 4×2 (widget_wide.xml + size branch + resize XML), Remember last collection for Share (`last_share_collection_id`)
+- [x] **Phase 3 forensic review** — 2 fix code + 1 fix CI:
+    - native-index preservation: `syncWidgetData` giữ native `widget_<id>_currentIndex` khi reads được từ prefs (tránh reset về 0 sau edit item)
+    - shuffle-bag seed: `_syncShuffleBag` dùng `displayIndex` thay vì `config.currentIndex` (tránh lặp item hiện tại)
+    - dead keys cleanup: `onDeleted` Kotlin dọn đủ keys (`_items`/`_contentFilter`/`_schedule`/`_tapAction`/`_shuffle_bag`/`_shuffle_index`/`_shuffle_source_fp`/`_daily_date`/`_daily_index`/`_next_rotation_at`)
+    - test: re-sync-keeps-native-index được thêm vào widget_service_test
+- [x] **Phase 3 CI fixes (real compile gate)**:
+    - `widget_provider_info.xml`: comment trong start tag → parse error → comment chuyển ra ngoài tag (5 XML files parse sau fix)
+    - Kotlin compile error: `(0 until n).shuffled()` trả read-only List → swap `bag[0] = bag[swapIdx]` lỗi → `MutableList` materialized, sau đó `(0 until totalItems).shuffled().toMutableList()`
+- [x] Phases 1–2B toàn bộ 138 tests pass; analyze 0 issues
 
-### Verification & Docs
-- [x] **Full suite pass** — baseline 93 + mới: storage +4 (C1) · rewarded +1 (H2) · share_target_dialog +5 (H5) · restore_rollback +2 (H6) — evidence trong output test
+### Feature Close Batch (2026-09-06 — prompt_feature_close_batch_final.md)
+- [x] **A1 privacy.html** — root stale copy removed (docs/ là canonical)
+- [x] **A2 UMP consent** — `UmpConsentService` (requestConsentInfoUpdate → loadAndShowConsentFormIfRequired → canRequestAds); mọi ad path (banner/rewarded/interstitial) gate sau `canShowAds`; Privacy Options trong Settings khi Google yêu cầu; form suppressed trong onboarding (user decision), re-resolve ở HomeScreen
+- [x] **A3 delete-collection ↔ free-limit** — `unbindWidgetConfig` (Hive + wcfg_* + configured_widget_ids qua cùng file Kotlin đọc/ghi + clear native display data) + Kotlin `unsaveConfiguredWidgetId` khi render không có collection; 3 tests
+- [x] **A4 sizeCategory** — `syncWidgetData` chỉ ghi khi native chưa có giá trị; resize-derived layout không bị đè; 2 tests
+- [x] **A5 reorder sync** — `reorderAndSyncItems` (reorder + updateWidgetsForCollection ngay lập tức); bulk-add defensive sync; 1 test
+- [x] **A6 restore reconcile** — `reconcileAfterRestore` detach widget orphan ngay (không chờ resume) + refresh; 1 test
+- [x] **A7 onRestored** — Kotlin override: clear old mapping + strip display data + registry rỗng + render "Tap to set up"
+- [x] **A8 dead code + cleartext** — đã sạch từ phase trước (verify lại 0 refs); cleartext GIỮ (AdMob SDK doc: một số mediation serve creative qua HTTP) — verdict ghi trong network_security_config.xml
+- [x] **Gate A** — analyze 0 issues, 145 tests pass
+- [x] **B1 Author** — Item.author (String?, Hive field 9, backward-compat) + optional input add/edit + widget `<id>_author` key + Kotlin render "— author" (1 style) + cleanup keys; 1 test
+- [x] **B2 Export/Import 1 collection** — `exportCollection`/`importCollection` + preview + confirm dialog (New collection / Add here); 4 tests
+- [x] **B3 Share quote as image** — `renderQuoteCardPng` (pure Canvas renderer, testable) + ShareQuoteCardScreen + entry từ item menu; 4 tests
+- [x] **B4 Widget Setup expose đủ engine** — verified: RotationMode.values / ScheduleMode.values / TapAction.values + favoritesOnly toggle đều có trong UI (không cần sửa)
+- [x] **B5 About version động** — PackageInfo (`package_info_plus`); 1 test
+- [x] **Gate B** — analyze 0 issues, 155 tests pass
+- [x] **Block C** — features_final.md sync + Deferred V1.1 list + progress_feature_close.md + **FEATURE FREEZE**
+
+### Phase 4 prep (Device QA gate — prompt_device_qa.md)
+- [x] Openspec change `device-qa-gate` (proposal + tasks)
+- [x] CI workflow_dispatch input `test_ads` (release APK `--dart-define=TEST_ADS=${{ inputs.test_ads || 'true' }}`) — chạy production ads build khi dispatch test_ads=false
+- [x] QA candidate build dispatch với test_ads=false → run **33972687792** = success (release APK 30.6 MB, unit thật)
+- [x] Run sheet `.plan/device_qa_run_sheet.md` — metadata + đủ MUST A1–A6/B1–B3/C1–C4/D1–D2/E1–E4/F1–F5/G1–G2/H1–H2 + SHOULD I1–I5 + tick boxes + triage hints
+- [x] features_final.md sync (Phase 1–2B shipped → F4/F5 = MUST)
+
+### Verification (current state — sau Feature Close Batch)
 - [x] `flutter analyze` — 0 errors, 0 warnings
-- [x] CI green (debug + release APK): runs `33832808067` (Sprint A) · `33857086225` + `33858880548` (plan5 Sprint 0) · plan6 (pending)
-- [x] plan5 Sprint 0 §1.1–§1.7 code DONE — openspec `changes/sprint0-completion/`
-- [x] plan6 code DONE — openspec `changes/plan6-bugfix/`
-- [x] `features.md` — full feature/UI inventory, synced to plan6
+- [x] `flutter test` — 155/155 All tests passed (138 cũ + 17 mới)
+- [x] Dead code: `source/` gone, `widget_config_screen.dart`/`widget_preview.dart` deleted, 0 references
+- [x] CI green: debug APK + release APK artifact (push build) + QA candidate success (TEST_ADS=false, run 33972687792)
+- [x] Canonical feature spec `.plan/features_final.md` synced (Phase 1–2B ship, deferred ghi rõ)
 
 ---
 
 ## ❌ Not Done / Open TODOs
 
-### Immediate
-- [ ] **Enable GitHub Pages** in repo Settings (manual: Settings → Pages → Source: GitHub Actions) — first push to main with `docs/` will trigger deploy
-- [ ] **Device test gate (plan5 §1.8 + plan6 Device QA — 10 mục)** — real Android device(s), Samsung + Pixel/stock:
-      1. Xoá Collection đang gắn Widget A → thêm Widget B → free-limit chặn NGAY trong app (không để B kẹt "Upgrade to Pro")
-      2. Kéo widget khỏi Home Screen → dump prefs (adb) → không còn `wcfg_*` của appWidgetId đã xoá
-      3. Configure → force-stop → mở lại → tap vẫn cycle đúng
-      4. Configure → reboot → vẫn render đúng, tap hoạt động
-      5. Rewarded 24h hết hạn khi app đóng hoàn toàn → mở lại → widget 2 tự khoá "Renew"/"Upgrade"
-      6. 2 widget → tap widget A → widget B KHÔNG đổi theo (currentIndex độc lập)
-      7. Xoá rồi thêm lại widget liên tiếp (appWidgetId reuse) → không hiển thị data cũ sai
-      8. Share Sheet end-to-end (Chrome/Reddit → Share → app) → dialog "Lưu vào collection" hiện đúng → lưu đúng chỗ → widget cập nhật
-      9. Tăng PREFS_VERSION thủ công → mở app → migration chạy đúng 1 lần, không lặp, không mất dữ liệu
-      10. Build `TEST_ADS=false` tạm → xem rewarded → logcat đúng ad unit `.../7613467914`, không phải sample
-- [ ] plan5 Sprint 1/2/3 — NOT started (hard gate: pass device test first)
+### Immediate (agent không làm được — cần human + device)
+> **⚠️ 2026-09-06 (Feature Close Batch):** QA candidate cũ (run 33972687792) **CHƯA chứa** batch mới (Author B1, Export/Import B2, Share image B3, UMP A2, các fix A3–A7...). Trước Wave 1 cần: (1) commit batch, (2) dispatch CI `test_ads=false` → build QA candidate mới, (3) tải APK mới.
+- [ ] **Device test gate (plan5 §1.8 + Phase 4)** — chờ human tester chạy Wave 1–6 theo `.plan/device_qa_run_sheet.md`:
+    1. A1–A5 (Wave 1 lifecycle/limit blockers)
+    2. B1 reboot / B2 force-stop / B3 update simulation
+    3. C1 rewarded-unlock-24h (QA build TEST_ADS=false) + C2 no-fill + C3/C4 expiry
+    4. D1–D2 share + E1–E4 backup (E3 restore không phantom)
+    5. F1–F5 rotation + G1–G2 OEM (Device B)
+    6. H1/H2 ads production
+    7. SHOULD I1–I5 (ghi risk nếu fail, không block tự)
+- [ ] **CLOSED_TESTING_OK verdict** chỉ có sau khi tất cả MUST PASS (hoặc N/A khi feature chưa ship — nhưng F4/F5 đã ship)
 
-### Monetization
-- [x] **Rewarded real ad unit ID registered** — `ca-app-pub-6917313063209470/7613467914` (plan6 C4) — verify logcat trên device (Device QA #10)
-- [ ] **IAP product ID `com.quotewidget.pro`** — no longer needed (IAP removed), but keep listed in Play Console for legacy purchasers
+### Release prep (trước wide)
+- [ ] **GitHub Pages** — enable repo Settings → Pages → Source: GitHub Actions (để privacy URL `https://hoangsoft90.github.io/QuoteWidget/privacy.html` resolving) — đã có `docs/privacy.html` + workflow pages.yml
+- [ ] **Privacy URL live verify**: kiểm tra `https://hoangsoft90.github.io/QuoteWidget/privacy.html` có trả về page không (agent ghi vào plan nhưng chưa verify URL live)
 
-### Polish
-- [ ] Settings "About" — add version number dynamically (currently hardcoded v1.0.0)
-- [ ] Consider: Ukrainian/Russian/Vietnamese localization for app text
+### Release signing / AAB / version (nếu cần upload Play Store)
+- [ ] **Version bump** — bạn muốn versionName+versionCode là bao nhiêu trước production (vd 1.0.0 → 1.0.1 / 1.1.0)?
+- [ ] **AAB artifact** — CI hiện chỉ build APK; nếu muốn đăng Play Store, thêm step `flutter build appbundle` vào workflow (cùng dispatch input test_ads)
+- [ ] **Release signing key** — cấu hình `android/key.properties` + `build.gradle` signingConfig release (hoặc play-app-signing); bạn dùng keystore nào?
 
-### Testing
-- [ ] Automated UI tests for paywall retry loop (currently widget tests)
-- [ ] Test reconciliation edge cases with >50 widgets (performance)
+### Polish (không block)
+- [x] Settings "About" — version động (B5 — PackageInfo)
+- [ ] Localization (Unicode/Vietnamese/Russian) — nếu có ý định
+
+### Testing (nâng cao — không block release)
+- [ ] Automated UI tests cho paywall retry loop (hiện widget tests)
+- [ ] Reconciliation performance edge case (>50 widget configs)
+
+### Feature-deferred (ghi rõ để tránh claim ảo)
+- [x] Export collection JSON — ✅ ĐÃ SHIP (Feature Close B2); CSV deferred V1.1
+- [ ] App shortcuts — 🚫 Deferred V1.1 (FEATURE FREEZE)
+- [ ] Material You — 🚫 Deferred V1.1 (FEATURE FREEZE)
+- [ ] TXT/clipboard import entry — 🚫 Deferred V1.1 (FEATURE FREEZE)
+- [ ] Tags / Time-of-day / Multi-source / History-Statistics / Widget prev-fav-next buttons / Preset marketplace / Notification reminders — 🚫 Deferred V1.1 (FEATURE FREEZE — list đầy đủ trong features_final.md §8)
+
+> **⚠️ FEATURE FREEZE (2026-09-06):** từ giờ chỉ nhận bugfix + Device QA. Không nhận feature mới cho tới khi có verdict CLOSED_TESTING_OK. Bước tiếp theo: chạy `.plan/prompt_device_qa.md` (Wave 1) trên APK build với `TEST_ADS=false`.
+
+### Cần hỏi lại user (chờ quyết định — đã ghi trong next.md)
+1. **Commit batch này?** Toàn bộ Feature Close Batch đang ở working tree (chưa commit) — user có muốn commit không trước khi build QA candidate?
+2. **AAB có cần không** (chỉ APK test, hay cần AAB đăng Play Store — thêm step `flutter build appbundle` vào CI)?
+3. **Version bump** trước release (vd 1.0.0 → 1.0.1 / 1.1.0)?
+4. **Release signing** — `android/key.properties` + signingConfig, hay dùng play-app-signing?
+5. **Privacy URL live** — verify `https://hoangsoft90.github.io/QuoteWidget/privacy.html` resolving?
+6. **QA candidate mới** — dispatch CI `test_ads=false` sau khi commit để Wave 1 test đúng bản có batch này?

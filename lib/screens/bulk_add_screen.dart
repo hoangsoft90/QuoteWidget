@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/collection_model.dart';
 import '../services/storage_service.dart';
+import '../services/widget_service.dart';
 
 class BulkAddScreen extends StatefulWidget {
   final Collection collection;
@@ -73,6 +74,17 @@ class _BulkAddScreenState extends State<BulkAddScreen> {
       collectionId: widget.collection.id,
       texts: _previewItems,
     );
+
+    // A5b defensive sync: Collection Detail re-syncs on return via its
+    // .then() callback, but if the pop beats that callback (or the return
+    // path changes later), the widget pool would stay stale. One sync here
+    // is idempotent and cheap.
+    try {
+      await WidgetService(widget.storageService)
+          .updateWidgetsForCollection(widget.collection.id);
+    } catch (_) {
+      // Widget host unavailable (tests / no home screen) — never block add.
+    }
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(

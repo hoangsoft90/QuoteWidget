@@ -43,7 +43,9 @@ class AdConfig {
   static const String _testRewarded = 'ca-app-pub-3940256099942544/5224354917';
 
   /// Non-personalized ads request extra — keeps tracking minimal, consistent
-  /// with the app's privacy positioning (no EEA consent prompt needed).
+  /// with the app's privacy positioning. NOTE: this does NOT replace the UMP
+  /// consent flow — every ad path also gates behind
+  /// [UmpConsentService.instance.canShowAds] (A2).
   static const Map<String, String> nonPersonalizedExtras = {'npa': '1'};
 
   /// Minimum time between two interstitial shows — AdMob discourages

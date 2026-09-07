@@ -2,26 +2,30 @@
 
 ## Current Status
 
-**Phase:** Phase 4 — Device QA Gate (prompt_device_qa.md) — **138/138 tests pass**, analyze 0 issues
-**Next:** human tester chạy Waves 1–6 trên Device A (stock) + B (Samsung/Xiaomi) theo `.plan/device_qa_run_sheet.md`
-**Gate:** QA candidate build `dbd4481` / run 33972687792 `TEST_ADS=false` = ✅ success — verdict CLOSED_TESTING_OK chỉ sau khi tester PASS hết MUST
+**Phase:** Phase 4 — Device QA Gate (prompt_device_qa.md) — **138/138 tests pass**, analyze 0 issues (đã xác nhận trong session)
+**Next:** human tester chạy Waves 1–6 trên Device A (stock/Pixel) + B (Samsung/Xiaomi OEM) theo `.plan/device_qa_run_sheet.md` — agent không có thiết bị thật, không thể tự chạy
+**Gate:** QA candidate build `dbd4481` / run 33972687792 `TEST_ADS=false` = ✅ success (release APK 30.6 MB) — verdict **CLOSED_TESTING_OK chỉ sau khi human tester PASS hết MUST** (hiện vẫn BLOCKED)
+**Lưu ý:** `.project/ai-rules.md` memory system được tạo trong session này — đọc file đó làm quy tắc; memory dump của session này trong `.project/memory/session-20260905-165532.json` (format: `session-YYYYMMDD-NNNNNN.json`)
 
 ### [2026-09-05] prompt_device_qa — Phase 4 Device QA prep
-- **Preflight PASS:** analyze 0 issues; `flutter test` 138/138; `source/` gone;
+- **Preflight PASS:** analyze 0 issues; `flutter test` 138/138 (15 test files); `source/` gone;
   `widget_config_screen.dart`/`widget_preview.dart` deleted, 0 references.
 - **CI:** `.github/workflows/build-debug-apk.yml` thêm `workflow_dispatch` input
   `test_ads` (default true) → release APK step dùng
   `--dart-define=TEST_ADS=${{ inputs.test_ads || 'true' }}`. Push build giữ test ads;
   dispatch `test_ads=false` cho QA candidate production ads (C1/H1). Commit `dbd4481`.
 - **QA candidate build:** run 33972687792 = success — `release-apk` artifact 30.6 MB,
-  `TEST_ADS=false` (production unit IDs: banner .../1409128007, interstitial
-  .../1569899782, rewarded .../7613467914).
+  `TEST_ADS=false` (production unit IDs: banner `ca-app-pub-6917313063209470/1409128007`,
+  interstitial `.../1569899782`, rewarded `.../7613467914`).
 - **Run sheet:** `.plan/device_qa_run_sheet.md` — metadata + đủ MUST A1–A6/B1–B3/C1–C4/
   D1–D2/E1–E4/F1–F5 (F4 shuffle + F5 daily = MUST vì đã ship Phase 2B)/G1–G2/H1–H2 +
   SHOULD I1–I5, tick boxes, triage hints per case, sign-off.
 - **Docs:** `.plan/features_final.md` sync — Phase 1–2B features đánh dấu shipped
   (verified bằng grep code); deferred items ghi rõ không claim ảo.
 - **OpenSpec:** `openspec/changes/device-qa-gate/` (proposal + tasks, đã chốt task checkbox).
+- **Project memory:** `.project/ai-rules.md` + `.project/memory/session-20260905-165532.json`
+  (tạo trong session này — đọc `ai-rules.md` để biết quy tắc ghi/đọc, dump session này
+  theo format `session-YYYYMMDD-NNNNNN.json`).
 
 ### [2026-09-05] prompt_phase0_to_release — Phase 1 Production Correctness
 - **P0-2 reconcile 2-way scan (fix P1 bug):** bỏ early-return "count == count →
@@ -229,20 +233,29 @@
 - Tests: **85/85** (75 baseline + 3 A1 + 3 A2 + 4 A5 mới). analyze exit 0.
 - CI run: (chờ push) — xem tasks.md sprint-a-stability.
 
+## Current State — Verified
+
+- `flutter analyze`: **0 errors, 0 warnings** (latest run in this session)
+- `flutter test`: **138/138** (15 test files) — latest run in this session
+- Dead code removed: `widget_config_screen.dart`, `widget_preview.dart`, `processShareText`/`ShareResult` — đều đã xóa, không còn references
+- IAP: `in_app_purchase` **đã gỡ khỏi pubspec** — chỉ còn rewarded-ad 24h, không buyPro/restorePurchases
+- Canonical feature source: `.plan/features_final.md` (đồng bộ với code)  - Project memory: `.project/ai-rules.md` + `.project/memory/session-20260905-165532.json` (tạo trong session này — đọc `ai-rules.md` để biết quy tắc ghi/đọc).
+
 ## Known Issues / TODO
 
-- [ ] CI build of new commit on GH Actions (run 33708833890) — Kotlin compile gate
-- [ ] Device test: rewarded ad flow, background share (no app flash), theme render
-- [ ] Enable GitHub Pages on repo so privacy URL resolves
-- [ ] Replace AdMob test App ID + rewarded unit id with real production ids
-- [ ] Configure IAP product `com.quotewidget.pro` in Play Console / App Store
-- [ ] Device: Samsung / Xiaomi OEM add-widget flows (plan B3)
+- [ ] **Device test gate (Phase 4)** — chờ human tester chạy Wave 1–6 theo `.plan/device_qa_run_sheet.md` (agent không có thiết bị thật)
+- [ ] **Privacy URL live**: `https://hoangsoft90.github.io/QuoteWidget/privacy.html` — đã có `docs/privacy.html` + `pages.yml`, nhưng chưa verify URL resolving; cần enable GitHub Pages trong repo Settings
+- [ ] **Release prep** (nếu muốn upload Play Store): version bump, AAB artifact (CI hiện chỉ build APK), release signing key
 
-## Files Modified (Sprint-next)
+## Files Modified (this session — Phase 4 prep)
 
-~30 files: iap/rewarded_ad/widget_data_bridge/widget/storage/toast/sample_data services,
-widget_theme model, collection+item models (+trash flags), main.dart, onboarding/
-use_case_selection/recently_deleted/settings/widget_config/widget_setup/home screens,
-widget_preview, ShareReceiverActivity+MainActivity Kotlin, QuoteWidgetProvider,
-widget layouts + 6 gradient drawables, AndroidManifest, privacy.html, pubspec,
-tests (3 new files + 2 new storage tests).
+- `.github/workflows/build-debug-apk.yml` — thêm `workflow_dispatch` input `test_ads` (QA candidate production ads build)
+- `.plan/features_final.md` — đồng bộ trạng thái Phase 1–2B (ship), deferred ghi rõ
+- `.plan/device_qa_run_sheet.md` — run sheet device QA (local, chưa commit)
+- `.plan/working.md` — đồng bộ (đây)
+- `result6.txt` — result log Phase 4 prep
+- `next.md` — next steps
+- `features.md` — full feature/UI inventory (đồng bộ)
+- `checklist.md` — checklist đồng bộ
+- `openspec/changes/device-qa-gate/` — openspec change (proposal + tasks)
+- `.project/` — project memory system (được tạo trong session này)

@@ -1,4 +1,6 @@
 import 'package:hive_flutter/hive_flutter.dart';
+import 'package:home_widget/home_widget.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/collection_model.dart';
 import '../models/item_model.dart';
 import '../models/widget_config_model.dart';
@@ -220,11 +222,15 @@ class StorageService {
     }
 
     // Remove widget configs pointing at this collection (no orphan widgets).
+    // A3: removal is a FULL unbind — Hive config, wcfg_* mapping,
+    // configured_widget_ids (the Free-limit count) and native display data —
+    // so the physical widget becomes re-configurable immediately instead of
+    // leaving the Free user stuck on "Upgrade to Pro".
     final widgetConfigs = _widgetConfigsBox.values
         .where((config) => config.collectionId == id)
         .toList();
     for (final config in widgetConfigs) {
-      await config.delete();
+      await unbindWidgetConfig(config.id);
     }
   }
 
@@ -303,11 +309,13 @@ class StorageService {
     required String collectionId,
     required String text,
     required int order,
+    String? author,
   }) async {
     final item = Item.create(
       collectionId: collectionId,
       text: text,
       order: order,
+      author: author,
     );
     await _itemsBox.put(item.id, item);
     return item;
@@ -332,10 +340,11 @@ class StorageService {
     return item;
   }
 
-  Future<void> updateItem(String id, String text) async {
+  Future<void> updateItem(String id, String text, {String? author}) async {
     final item = _itemsBox.get(id);
     if (item != null && !item.isDeleted) {
       item.text = text;
+      item.author = author;
       await item.save();
     }
   }
@@ -553,6 +562,115 @@ class StorageService {
 
   Future<void> deleteWidgetConfig(String id) async {
     await _widgetConfigsBox.delete(id);
+  }
+
+  /// A3: full widget-config unbind — used when a widget's collection is
+  /// deleted (deleteCollection) or the config itself is deleted. Removes, in
+  /// order: the Hive config, both wcfg_* mapping directions, the appWidgetId
+  /// from the native configured_widget_ids registry (the Free-limit count —
+  /// must be updated through the SAME file Kotlin reads/writes, otherwise the
+  /// native side would re-add the id on the next render), and the native
+  /// display data (`widget_<id>_collectionId`) — without clearing it, onUpdate
+  /// /handleTap would re-register the id on the next render. Best-effort:
+  /// never throws.
+  /// A3/A6 shared: remove one appWidgetId from the native
+  /// `configured_widget_ids` registry (the Free-limit count) and clear its
+  /// native display data, so the widget returns to "Tap to set up" and stops
+  /// counting toward the Free limit. Registry is edited through the SAME file
+  /// Kotlin reads/writes (FlutterSharedPreferences). Best-effort, never throws.
+  Future<void> releaseNativeWidget(int appWidgetId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final idsStr = prefs.getString('configured_widget_ids') ?? '';
+      final ids = idsStr
+          .split(',')
+          .where((s) => s.isNotEmpty)
+          .map((s) => int.tryParse(s) ?? -1)
+          .where((v) => v >= 0)
+          .toSet();
+      if (ids.remove(appWidgetId)) {
+        final joined = (ids.toList()..sort()).join(',');
+        await prefs.setString('configured_widget_ids', joined);
+        await prefs.setString('flutter.configured_widget_ids', joined);
+      }
+    } catch (_) {
+      // Registry edit is best-effort.
+    }
+    try {
+      // Native display data: clearing collectionId makes Kotlin show
+      // "Tap to set up this widget" and stop re-registering the id.
+      await HomeWidget.saveWidgetData(
+          'widget_${appWidgetId}_collectionId', null);
+    } catch (_) {
+      // Channel may be unavailable (tests) — registry already updated.
+    }
+  }
+
+  Future<void> unbindWidgetConfig(String configId) async {
+    int? appWidgetId;
+    try {
+      appWidgetId = await WidgetDataBridge.getAppWidgetIdForConfig(configId);
+    } catch (_) {
+      // Prefs unavailable (tests) — nothing to unbind beyond the Hive config.
+    }
+    if (appWidgetId != null) {
+      await releaseNativeWidget(appWidgetId);
+      try {
+        await WidgetDataBridge.removeWidgetMapping(appWidgetId);
+      } catch (_) {}
+    }
+    // ALWAYS remove the Hive config, even when prefs/channel are unavailable
+    // (tests, non-Android) — deleteCollection must never leave the config.
+    await _widgetConfigsBox.delete(configId);
+  }
+
+  /// A6: post-restore reconciliation — a destructive restore wipes ALL Hive
+  /// data, so every surviving native widget's mapping is orphaned. Detach
+  /// each native widget from its now-dead config (releaseNativeWidget +
+  /// mapping cleanup) and clear every config that still exists in Hive, then
+  /// refresh the widgets that remain configured ("Tap to set up" for the
+  /// orphaned ones). Runs immediately — no waiting for the next app resume.
+  Future<void> reconcileAfterRestore() async {
+    try {
+      final nativeIds =
+          await WidgetDataBridge.getNativeConfiguredWidgetIds();
+      if (nativeIds != null) {
+        for (final id in nativeIds) {
+          final configId = await WidgetDataBridge.getConfigIdForWidget(id);
+          if (configId != null) {
+            // The config was wiped by the restore → full detach.
+            await releaseNativeWidget(id);
+            await WidgetDataBridge.removeWidgetMapping(id);
+          }
+          // No mapping → already unconfigured → nothing to detach.
+        }
+      }
+    } catch (_) {
+      // Native channel unavailable — still refresh whatever is in Hive.
+    }
+    // Any config left in Hive (restoreFromBackup with configs, or append
+    // mode) gets a fresh render with the restored data.
+    await refreshAllWidgets();
+  }
+
+  /// A6: push a re-render for every currently-synced widget (config with a
+  /// live native mapping). Best-effort per widget.
+  Future<void> refreshAllWidgets() async {
+    for (final config in _widgetConfigsBox.values.toList()) {
+      try {
+        final appWidgetId =
+            await WidgetDataBridge.getAppWidgetIdForConfig(config.id);
+        if (appWidgetId != null) {
+          await HomeWidget.updateWidget(
+            name: 'QuoteWidgetProvider',
+            androidName: 'QuoteWidgetProvider',
+          );
+          break; // one push re-renders ALL instances of the provider
+        }
+      } catch (_) {
+        // Channel unavailable — skip.
+      }
+    }
   }
 
   // ==================== Backup/Restore ====================
