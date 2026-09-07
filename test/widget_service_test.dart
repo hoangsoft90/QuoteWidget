@@ -367,6 +367,90 @@ void main() {
           reason: 'the replacement shows immediately');
     });
 
+    test('deleting the LAST item never pins a negative daily_index; adding '
+        'items back re-pins the same day', () async {
+      mockStatefulHomeWidgetChannel();
+      final col = await storage.createCollection('Col');
+      final a =
+          await storage.createItem(collectionId: col.id, text: 'A', order: 0);
+      final config = await storage.createWidgetConfig(
+        collectionId: col.id,
+        schedule: ScheduleMode.daily,
+      );
+      final service = WidgetService(storage);
+      final today = RotationService().localDateKey(DateTime.now());
+
+      await seedPin(
+        appWidgetId: 12,
+        dailyDate: today,
+        pinnedId: a.id,
+        pinnedIndex: 0,
+      );
+
+      // Mid-day: delete the ONLY (pinned) item → pool becomes empty.
+      await storage.deleteItem(a.id);
+      await service.syncWidgetData(config, appWidgetId: 12);
+      expect(
+          await HomeWidget.getWidgetData<String>('widget_12_daily_index'),
+          isNot('-1'),
+          reason: 'review guard: a negative daily_index must never be persisted '
+              '(Kotlin same-day snap would render items[-1] and crash once '
+              'items exist again)');
+
+      // User adds two fresh items later the SAME day → the stale id triggers a
+      // proper same-day re-pin (no crash, valid index).
+      await storage.createItem(collectionId: col.id, text: 'B', order: 0);
+      await storage.createItem(collectionId: col.id, text: 'C', order: 1);
+      await service.syncWidgetData(config, appWidgetId: 12);
+
+      final newId =
+          await HomeWidget.getWidgetData<String>('widget_12_daily_item_id');
+      final newIndex = int.tryParse(
+              await HomeWidget.getWidgetData<String>(
+                      'widget_12_daily_index') ??
+                  '') ??
+          -1;
+      expect(newId, isNotEmpty);
+      expect(newId, isNot(a.id), reason: 'deleted item cannot stay pinned');
+      expect(newIndex, isNot(-1));
+      final pool = storage.getItemsForCollection(col.id); // [B, C]
+      expect(pool[newIndex].id, newId,
+          reason: 'same-day re-pin must point at a real item');
+    });
+
+    test('daily configured on an EMPTY collection records the day but never '
+        'a negative index', () async {
+      mockStatefulHomeWidgetChannel();
+      final col = await storage.createCollection('Col');
+      final config = await storage.createWidgetConfig(
+        collectionId: col.id,
+        schedule: ScheduleMode.daily,
+      );
+      final service = WidgetService(storage);
+      final today = RotationService().localDateKey(DateTime.now());
+
+      // First sync with an empty pool.
+      await service.syncWidgetData(config, appWidgetId: 13);
+      expect(await HomeWidget.getWidgetData<String>('widget_13_daily_date'),
+          today,
+          reason: 'day is still recorded so it is not treated as un-activated');
+      expect(await HomeWidget.getWidgetData<String>('widget_13_daily_index'),
+          isNull,
+          reason: 'review guard: an empty pool must never produce a negative '
+              'daily_index');
+      expect(
+          await HomeWidget.getWidgetData<String>('widget_13_daily_item_id'),
+          isNull);
+
+      // Items arrive later the same day → still no negative index anywhere.
+      await storage.createItem(collectionId: col.id, text: 'X', order: 0);
+      await service.syncWidgetData(config, appWidgetId: 13);
+      expect(await HomeWidget.getWidgetData<String>('widget_13_daily_index'),
+          isNull);
+      expect(await HomeWidget.getWidgetData<String>('widget_13_currentIndex'),
+          isNot('-1'));
+    });
+
     test('a PAST daily_date is left to native rollover — yesterday\'s id is '
         'never resurrected as today\'s pin by a Flutter sync', () async {
       mockStatefulHomeWidgetChannel();

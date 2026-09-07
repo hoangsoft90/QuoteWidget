@@ -332,7 +332,7 @@ class QuoteWidgetProvider : AppWidgetProvider() {
         val items = parseTextPool(getString(context, "${prefix}_items"))
         val contentFilter = getString(context, "${prefix}_contentFilter", "all")
         val fallbackText = getString(context, "${prefix}_text")
-        val text = if (items.isNotEmpty() && currentIndex < items.size) {
+        val text = if (items.isNotEmpty() && currentIndex >= 0 && currentIndex < items.size) {
             items[currentIndex]
         } else {
             fallbackText
@@ -713,11 +713,19 @@ class QuoteWidgetProvider : AppWidgetProvider() {
                 }
                 if (!fromTap) {
                     // Same day, system/app refresh → snap to the pinned item.
+                    // Review guard: only a VALID daily index (0 ..< totalItems)
+                    // may be persisted/returned. A negative or out-of-range
+                    // daily_index (e.g. the widget was configured on an empty
+                    // pool before any item existed) must never overwrite
+                    // currentIndex or index the text pool (crash guard).
                     val dailyIndex = getInt(context, "${prefix}_daily_index", currentIndex)
-                    if (dailyIndex != currentIndex) {
-                        hwPrefs.edit().putString("${prefix}_currentIndex", dailyIndex.toString()).apply()
+                    if (dailyIndex in 0 until totalItems) {
+                        if (dailyIndex != currentIndex) {
+                            hwPrefs.edit().putString("${prefix}_currentIndex", dailyIndex.toString()).apply()
+                        }
+                        return dailyIndex
                     }
-                    return dailyIndex
+                    return currentIndex
                 }
                 // Same day + tap → keep the temporary item the user is browsing.
                 return currentIndex

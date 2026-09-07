@@ -175,15 +175,21 @@ class WidgetService {
   /// P1-2: persist today's daily pin — index AND item id. The id is what
   /// keeps today's quote stable when the pool changes mid-day (index alone
   /// can silently point at a different item after a delete/reorder).
+  ///
+  /// Review guard: when [idx] is invalid (-1 for an empty pool) NOTHING is
+  /// written — persisting a negative daily_index would make Kotlin's same-day
+  /// snap store currentIndex = -1 and then index the text pool with it
+  /// (IndexOutOfBounds on every refresh once items are added back). The caller
+  /// already wrote `daily_date` (first activation) / keeps the stale
+  /// `daily_item_id` (deleted pin) so a LATER sync can pin properly.
   Future<void> _pinDailyItem(String prefix, List<Item> items, int idx) async {
+    if (idx < 0 || idx >= items.length) return;
     await HomeWidget.saveWidgetData('${prefix}_daily_index', idx.toString());
-    final id = (idx >= 0 && idx < items.length) ? items[idx].id : '';
+    final id = items[idx].id;
     await HomeWidget.saveWidgetData('${prefix}_daily_item_id', id);
-    if (idx >= 0 && idx < items.length) {
-      // Show the freshly pinned item immediately (also overrides a stale
-      // index when the previous pin was deleted).
-      await HomeWidget.saveWidgetData('${prefix}_currentIndex', idx.toString());
-    }
+    // Show the freshly pinned item immediately (also overrides a stale
+    // index when the previous pin was deleted).
+    await HomeWidget.saveWidgetData('${prefix}_currentIndex', idx.toString());
   }
 
   /// Phase 2B: (re)build the persisted shuffle bag when the source changed
