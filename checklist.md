@@ -117,9 +117,17 @@
 - [x] Run sheet `.plan/device_qa_run_sheet.md` — metadata + đủ MUST A1–A6/B1–B3/C1–C4/D1–D2/E1–E4/F1–F5/G1–G2/H1–H2 + SHOULD I1–I5 + tick boxes + triage hints
 - [x] features_final.md sync (Phase 1–2B shipped → F4/F5 = MUST)
 
-### Verification (current state — sau Feature Close Batch)
+### Review + QA candidate (2026-09-07)
+- [x] **Commit batch** — `c3b6f73` (35 files, +2285/−467) pushed to main; secret-scan sạch; session artifacts (handoffs/.project/skills-lock) cố tình không commit
+- [x] **CI push run 34074858578** — success (analyze → test → debug APK → release APK)
+- [x] **QA candidate MỚI — dispatch run 34074951700, input `test_ads=false`** — success; artifact `release-apk` sẵn sàng tải về
+- [x] **Code review batch (OCR không khả dụng → review thủ công theo fallback + ponytail-review skill):** 0 blocker; 1 minor đã fix — ghi registry dư key rác `flutter.flutter.configured_widget_ids` (`f54623f`: 1 write duy nhất, plugin tự thêm prefix đúng key Kotlin đọc; test mới assert không sinh key rác); nguy cơ author-stale B1 xác nhận đã có test bọc (`widget_service_test.dart:399-421`)
+- [x] **Cleanup `f54623f`** — analyze 0 issue, 155/155 tests (local; **chưa push** — no-op trên thiết bị, không bắt buộc build lại QA candidate)
+- [x] **Cleanup `1fff5bc` (mirror f54623f)** — `widget_data_bridge.dart`: bỏ write dư `flutter.is_pro_expires_at` (key rác `flutter.flutter.*`) + cắt term đọc chết trong `getProExpiry`; test mới `widget_data_bridge_test.dart` (4 test: contract key + cấm mọi key `flutter.flutter.*`) — analyze 0 issue, **159/159 tests** (local; **chưa push**)
+
+### Verification (current state — sau Feature Close Batch + cleanup)
 - [x] `flutter analyze` — 0 errors, 0 warnings
-- [x] `flutter test` — 155/155 All tests passed (138 cũ + 17 mới)
+- [x] `flutter test` — 159/159 All tests passed (138 gốc + 17 batch + 4 bridge-hygiene)
 - [x] Dead code: `source/` gone, `widget_config_screen.dart`/`widget_preview.dart` deleted, 0 references
 - [x] CI green: debug APK + release APK artifact (push build) + QA candidate success (TEST_ADS=false, run 33972687792)
 - [x] Canonical feature spec `.plan/features_final.md` synced (Phase 1–2B ship, deferred ghi rõ)
@@ -129,7 +137,7 @@
 ## ❌ Not Done / Open TODOs
 
 ### Immediate (agent không làm được — cần human + device)
-> **⚠️ 2026-09-06 (Feature Close Batch):** QA candidate cũ (run 33972687792) **CHƯA chứa** batch mới (Author B1, Export/Import B2, Share image B3, UMP A2, các fix A3–A7...). Trước Wave 1 cần: (1) commit batch, (2) dispatch CI `test_ads=false` → build QA candidate mới, (3) tải APK mới.
+> **✅ 2026-09-07 update:** batch đã commit `c3b6f73` + push; QA candidate mới = **run 34074951700 (TEST_ADS=false, success)** — chỉ còn: (1) tải artifact `release-apk` từ run đó, (2) chạy Wave 1 trên Device A. Cleanup `f54623f` chưa push nhưng là no-op trên thiết bị (không đổi hành vi) → APK candidate vẫn hợp lệ cho Wave 1.
 - [ ] **Device test gate (plan5 §1.8 + Phase 4)** — chờ human tester chạy Wave 1–6 theo `.plan/device_qa_run_sheet.md`:
     1. A1–A5 (Wave 1 lifecycle/limit blockers)
     2. B1 reboot / B2 force-stop / B3 update simulation
@@ -167,9 +175,8 @@
 > **⚠️ FEATURE FREEZE (2026-09-06):** từ giờ chỉ nhận bugfix + Device QA. Không nhận feature mới cho tới khi có verdict CLOSED_TESTING_OK. Bước tiếp theo: chạy `.plan/prompt_device_qa.md` (Wave 1) trên APK build với `TEST_ADS=false`.
 
 ### Cần hỏi lại user (chờ quyết định — đã ghi trong next.md)
-1. **Commit batch này?** Toàn bộ Feature Close Batch đang ở working tree (chưa commit) — user có muốn commit không trước khi build QA candidate?
+1. **Push 2 commit cleanup (`f54623f` + `1fff5bc`)?** (local ahead 2 — push sẽ trigger CI; cả 2 đều no-op trên thiết bị nên không cần build lại QA candidate trừ khi bạn muốn bản build chứa mọi commit)
 2. **AAB có cần không** (chỉ APK test, hay cần AAB đăng Play Store — thêm step `flutter build appbundle` vào CI)?
 3. **Version bump** trước release (vd 1.0.0 → 1.0.1 / 1.1.0)?
 4. **Release signing** — `android/key.properties` + signingConfig, hay dùng play-app-signing?
 5. **Privacy URL live** — verify `https://hoangsoft90.github.io/QuoteWidget/privacy.html` resolving?
-6. **QA candidate mới** — dispatch CI `test_ads=false` sau khi commit để Wave 1 test đúng bản có batch này?

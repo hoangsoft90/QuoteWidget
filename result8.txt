@@ -1,0 +1,102 @@
+RESULT 8 — 2026-09-07
+======================
+Phạm vi: commit + push Feature Close Batch, build QA candidate mới, code review
+toàn bộ batch, cleanup 1 minor finding. Bằng chứng-only (không báo lời).
+
+1) COMMIT & PUSH
+-----------------
+- Feature Close Batch (A1–A9, B1–B5, Block C) được commit: c3b6f73
+  - 35 files changed, +2285 / -467
+  - Secret-scan trên diff: sạch (không key/token/password; chỉ ca-app-pub app id công khai)
+  - Session artifacts (handoff_*.md, .project/, skills-lock.json) cố tình KHÔNG commit
+    (nhất quán với lịch sử repo)
+- Push: d362c6c..c3b6f73  main -> main (origin)
+
+2) CI — GITHUB ACTIONS (workflow: Build Debug APK)
+---------------------------------------------------
+- Run 34074858578 (trigger: push, TEST_ADS mặc định true)
+  → completed SUCCESS: analyze --fatal-warnings → test → debug APK → release APK
+- Run 34074951700 (trigger: workflow_dispatch, input test_ads=false)
+  → completed SUCCESS → đây là QA CANDIDATE MỚI (release APK, production ad units)
+  → artifact: release-apk (thay thế QA candidate cũ 33972687792 vốn KHÔNG chứa batch)
+- Lưu ý: gh CLI chưa login; dispatch thực hiện qua GH_TOKEN đọc từ credential
+  trong git remote URL (không in token ra output).
+- ⚠️ Security note cho user: git remote origin nhúng PAT dạng
+  https://user:ghp_...@github.com/... — token xuất hiện được khi chạy `git remote -v`;
+  nên cân nhắc rotate token và chuyển sang credential helper.
+
+3) CODE REVIEW BATCH c3b6f73
+-----------------------------
+- open-code-review (OCR): KHÔNG khả dụng trong session → fallback review thủ công
+  theo quy định Graceful Degradation (tự đọc diff, kiểm tra null-check, secret,
+  race, pattern); codebase-memory-mcp/ccc cũng không có → git diff + grep thay thế.
+- ponytail-review skill: đã chạy — tìm thấy đúng 1 mục dư thừa (xem mục 4),
+  còn lại "lean".
+- Scope compliance: diff khớp 100% các mục A1–A9/B1–B5/Block C trong
+  .plan/prompt_feature_close_batch_final.md — không lan phạm vi.
+- Kết luận review: 0 blocker, 0 High. Findings:
+  a) [ĐÃ FIX] storage_service.releaseNativeWidget ghi thừa key rác
+     'flutter.flutter.configured_widget_ids' (1 dòng writeExplicit bị plugin
+     auto-prefix 2 lần). Vô hại về hành vi (không ai đọc) nhưng là rác prefs.
+  b) [Report-only, KHÔNG sửa — ngoài phạm vi yêu cầu] widget_data_bridge.dart:107
+     vẫn ghi đè key thường 'is_pro_expires_at' bằng chuỗi có prefix 'flutter.'
+     → sinh key rác 'flutter.flutter.is_pro_expires_at' TẠI RUNTIME; không sai
+     hành vi vì Kotlin đọc qua chuỗi fallback + Android tự khử trùng tên key
+     ('.' hợp lệ), nhưng đáng dọn theo cùng cách f54623f.
+  c) [Verified-safe] Nguy cơ author-stale (B1) sau native tap: pool '_items'
+     chỉ chứa text, nhưng test widget_service_test.dart:399-421 ('B1: author key
+     follows the displayed item, empty when unset') đã bọc đúng case → pass.
+  d) [Verified-safe] A3 registry: Dart write auto-prefix thành
+     flutter.configured_widget_ids; Kotlin getString(context) fallback đọc đúng
+     key đó (hw file trước, flutter.-prefixed sau) → cơ chế khớp 2 phía.
+- Ponytail: mobile code đã lean; chỉ mục (a) được cut. Không đề xuất cắt gì
+  thuộc vùng an toàn (limit gate / consent / registry).
+
+4) CLEANUP COMMIT (theo yêu cầu user)
+--------------------------------------
+- f54623f chore(a3): drop redundant double-prefixed registry write
+  - lib/services/storage_service.dart: bỏ dòng setString('flutter.configured_widget_ids')
+    → còn 1 write duy nhất (plugin tự prefix đúng key Kotlin đọc)
+  - test/storage_service_test.dart: 2 chỗ
+    * test 'unbindWidgetConfig removes mapping + registry id + Hive config':
+      thay assert key rác bằng assert NGƯỢC —
+      expect(getKeys().contains('flutter.flutter.configured_widget_ids'), isFalse)
+    * test 'A3 acceptance': bỏ 1 dòng seed key rác
+- Test evidence:
+  * flutter test test/storage_service_test.dart → 53/53 pass
+    (lần chạy đầu sau sửa code có 1 FAIL đúng như dự đoán: assert cũ vô tình
+    verify chính key rác — đã chuyển thành assert vắng mặt key rác)
+  * flutter analyze → No issues found!
+  * flutter test (full) → 155/155 pass
+- Commit đã tạo LOCAL, CHƯA PUSH. Không build lại QA candidate: thay đổi là
+  no-op trên thiết bị (xóa write key không ai đọc; hành vi registry giữ nguyên).
+
+5) TRẠNG THÁI HIỆN TẠI
+-----------------------
+- main = f54623f (local) / origin/main = c3b6f73 → local ahead 1 commit
+- QA candidate hợp lệ cho Wave 1: run 34074951700 (chứa toàn bộ batch c3b6f73)
+- Việc còn lại: tải release-apk từ run 34074951700 → cài Device A → Wave 1 A1–A6
+  theo .plan/device_qa_run_sheet.md; push f54623f kèm lần commit tới.
+
+Verdict: REVIEW DONE — 0 blocker; gates xanh (analyze 0 issue, 155/155).
+
+6) APPENDIX — CLEANUP 2 (2026-09-07, sau report ban đầu)
+---------------------------------------------------------
+- 1fff5bc chore(bridge): drop redundant double-prefixed pro-expiry write
+  (mirror f54623f cho is_pro_expires_at — mục 3b ở trên)
+  - lib/services/widget_data_bridge.dart:
+    * setProExpiry: bỏ write tường minh 'flutter.is_pro_expires_at' (plugin
+      auto-prefix đã đặt dữ liệu đúng physical key flutter.is_pro_expires_at —
+      chính là key Kotlin getLong() fallback đọc, verify tại QuoteWidgetProvider.kt:911-920)
+    * getProExpiry: cắt term đọc key rác 'flutter.is_pro_expires_at' giờ đã chết
+  - test/widget_data_bridge_test.dart (MỚI, 4 test):
+    * contract: setProExpiry ghi logical key 'is_pro_expires_at' (mock store giữ
+      key nguyên văn — prefix flutter. là việc của platform store thật trên thiết bị)
+    * cấm mọi key flutter.flutter.* (pattern-wide, không chỉ 1 key)
+    * setProExpiry(null) → '0' = never unlocked; getProExpiry round-trip; default 0
+- Bài học ghi lại: SharedPreferences.setMockInitialValues KHÔNG mô phỏng prefix
+  'flutter.' của plugin (prefix nằm ở platform store thật) → test assert key
+  logic + assert vắng mặt pattern rác, KHÔNG assert physical key prefix.
+- Evidence: widget_data_bridge_test 4/4; flutter analyze 0 issue; full 159/159.
+- Trạng thái: local main = 1fff5bc (ahead 2 so với origin/main = c3b6f73);
+  cả 2 commit cleanup là no-op trên thiết bị → QA candidate 34074951700 vẫn hợp lệ.

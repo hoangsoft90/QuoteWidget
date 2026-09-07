@@ -2,7 +2,7 @@
 
 > Tài liệu đầy đủ tính năng + UI của app, đối chiếu trực tiếp với source code.
 > **Canonical feature spec: `.plan/features_final.md`** (thắng nếu lệch — Phase 1 P0-1).
-> Cập nhật lần cuối: **2026-09-06** (Feature Close Batch — analyze 0 issue, 155/155 tests pass; chưa commit).
+> Cập nhật lần cuối: **2026-09-07** (Feature Close Batch đã commit `c3b6f73` + push; 2 commit cleanup prefs-hygiene `f54623f` + `1fff5bc`; analyze 0 issue, 159/159 tests pass).
 > ⚠️ **FEATURE FREEZE 2026-09-06** — chỉ nhận bugfix + Device QA, không feature mới tới CLOSED_TESTING_OK (Deferred V1.1: `features_final.md` §8).
 
 **App:** Hiển thị nội dung cá nhân (quote, từ vựng, lời nhắc…) trên Home Screen widget Android.
@@ -186,7 +186,7 @@
 - **targetSdk/compileSdk 36** (yêu cầu Google Play 31/8/2026) · AGP 8.11.1 · Gradle 8.14.3 · Kotlin 2.2.20 · Java 17.
 - **Cleartext HTTP:** `network_security_config.xml` (base-config cleartextTrafficPermitted=true) + manifest attribute — http hoạt động trong release APK.
 - **App icon:** adaptive (gradient + `format_quote` vector) + legacy PNG đủ mipmap.
-- **CI (GH Actions):** Flutter 3.47.1 → `flutter analyze --fatal-warnings` → `flutter test` → **build debug APK + release APK** (2 artifacts). Workflow `build-debug-apk.yml` có `workflow_dispatch` input `test_ads` (default true) để QA candidate production ads build (`--dart-define=TEST_ADS=${{ inputs.test_ads || 'true' }}`); push build giữ test ads.
+- **CI (GH Actions):** Flutter 3.47.1 → `flutter analyze --fatal-warnings` → `flutter test` → **build debug APK + release APK** (2 artifacts). Workflow `build-debug-apk.yml` có `workflow_dispatch` input `test_ads` (default true) để QA candidate production ads build (`--dart-define=TEST_ADS=${{ inputs.test_ads || 'true' }}`); push build giữ test ads. **QA candidate hiện tại: run 34074951700 (TEST_ADS=false, success, 2026-09-07, chứa batch c3b6f73)** — thay run cũ 33972687792.
 - **Theme app:** Material 3, seed `#6750A4`, light + dark.
 - **Điện thoại duy nhất:** Android-only (iOS scaffold có sẵn nhưng chưa setup ads/không trong scope).
 - **Forensic fixes (Phase 3, 2026-09-05):** 2 fix code + 1 fix CI — native-index preservation, shuffle-bag seed displayIndex, dead-key cleanup onDeleted, Kotlin compile error (shuffled() read-only List → MutableList), widget provider XML comment-location parse error.
@@ -195,7 +195,7 @@
 
 ## 11. Test suite
 
-- `flutter test` → **138/138 All tests passed**; `flutter analyze` → 0 errors, 0 warnings (`--fatal-warnings` chạy trên CI — plan6 C5 + Phase 3 check).
+- `flutter test` → **159/159 All tests passed**; `flutter analyze` → 0 errors, 0 warnings (`--fatal-warnings` chạy trên CI — plan6 C5 + Phase 3 check).
 - Phủ: storage (collections/items/widget-configs/trash/purge/limit + A1 native-count gate + A2 reconciliation + C1 orphan-mapping cleanup + Phase 2A favorites/search/duplicate/templates + Phase 2B contentFilter/rotation fields/schedule/tapAction + Phase 3 re-sync-keeps-native-index test), rotation service (Phase 2B shuffle bag/daily new tests), IAP (time-bound Pro, permanent, Fix B widget-push), rewarded outcome gate (Fix A) + H2 no-ad → unavailable enum, interstitial frequency gate, backup import/export + phantom-restore (Phase 1) test, curated themes consistency, widget limit, share service (§1.7 Undo target), share-undo SnackBar UI (3 widget tests §1.7), share-target dialog UI (5 widget tests plan6 H5), restore rollback (2 integration tests plan6 H6 — snapshot trước clearAll, rollback về đúng trạng thái cũ), syncProStatus startup-push (§1.6), paywall sheet, onboarding/sample data, **Phase 1 reconcile tests (2 direction + 1 phantom-restore)**, **Phase 2A storage contentFilter JSON round-trip + WidgetService pool test**, **Phase 2B rotation_service shuffle/daily tests**, **Phase 2B widget_service schedule/tapAction keys + storage fields round-trip**, **Phase 3 forensic re-sync test**.
 
 - Mô phỏng: Hive `init(testPath:)`, SharedPreferences `setMockInitialValues`, MethodChannel mock (`home_widget`, toast), `PathProviderPlatform` fake (H6), `RotationService` pure Dart (dễ test).
@@ -212,6 +212,7 @@
 - **Phase 1 P0-1 (2026-09-05):** legacy `source/` tree deleted — canonical = root. README/AGENTS ghi canonical-source note.
 - **Phase 1 P0-5 (2026-09-05):** release runbook ghi `--dart-define=TEST_ADS=false` vào operating_rules.md.
 - **Phase 4 (2026-09-05):** openspec change `device-qa-gate`, CI dispatch input `test_ads`, QA candidate build 33972687792 (success, TEST_ADS=false, 30.6 MB), run sheet `.plan/device_qa_run_sheet.md`.
+- **2026-09-07 (review + cleanup):** batch commit `c3b6f73` + push; QA candidate mới = run 34074951700 (TEST_ADS=false) thay 33972687792; review thủ công (OCR unavailable fallback) + ponytail → 0 blocker; cleanup `f54623f` xóa ghi dư key rác `flutter.flutter.configured_widget_ids` (registry A3 — 1 write duy nhất, plugin tự prefix đúng key Kotlin đọc). 155/155 tests, analyze 0 issues.
 
 ---
 
@@ -237,6 +238,7 @@ Dưới đây là tính năng/future plan đã **không làm trong V1** — ghi 
 - **Phase 3 (forensic review, 2026-09-05):** 2 fix code (native-index preservation, shuffle-bag seed displayIndex, dead-key cleanup onDeleted) + 1 fix CI (Kotlin compile error shuffled() read-only List → MutableList; widget provider XML comment-location parse error). Re-sync-keeps-native-index test thêm vào widget_service_test.
 - **Phase 4 (prep, 2026-09-05):** openspec `device-qa-gate`, CI dispatch input `test_ads`, QA candidate build 33972687792 success (TEST_ADS=false, 30.6 MB release APK), run sheet `.plan/device_qa_run_sheet.md` (chưa commit — local only). Verdict BLOCKED — chờ human tester Wave 1 (A1–A5).
 - **Feature Close Batch (2026-09-06):** Block A fixes (A1 privacy.html, A2 UMP consent + Privacy Options, A3 delete→free-limit unstick, A4 sizeCategory native-truth, A5 reorder sync, A6 restore reconcile, A7 onRestored, A8 dead-code/cleartext verdict) + Block B features (B1 Author widget line, B2 collection export/import, B3 share quote as image, B4 verified setup UI, B5 About version) + Block C docs sync. Tests 138 → 155. `flutter analyze` 0 issues. **FEATURE FREEZE** — chi tiết: `.plan/progress_feature_close.md`.
+- **Commit + QA candidate + review (2026-09-07):** `c3b6f73` (35 files) pushed; CI push 34074858578 ✅; QA candidate dispatch 34074951700 (TEST_ADS=false) ✅; review 0 blocker (fallback thủ công — OCR unavailable; ponytail 1 cut); cleanup prefs-hygiene `f54623f` (registry A3) + `1fff5bc` (pro-expiry bridge, +4 test cấm key rác `flutter.flutter.*`) — chưa push, no-op trên thiết bị. Chi tiết: `result8.txt`.
 
 ---
 ## END
