@@ -56,18 +56,23 @@ jobs:
         run: flutter test --no-pub 2>&1 | tail -10
 
       - name: Decode release keystore from CI secrets
-        # Release-engineering Task 4: only runs when the user has configured
-        # the RELEASE_* secrets in GitHub repo Settings. Never hardcode secret
-        # values here — this just materializes android/key.properties +
-        # upload-keystore.jks so gradle picks real signing (Task 1 fallback
-        # covers the no-secret case).
-        if: ${{ secrets.RELEASE_KEYSTORE_BASE64 != '' }}
+        # Release-engineering Task 4: materializes android/key.properties +
+        # upload-keystore.jks when the user configured the RELEASE_* secrets.
+        # GitHub docs: secrets CANNOT be reliably referenced in `if:`
+        # conditionals — so this step always runs and gates INSIDE the script
+        # via env (env supports secrets at step level). Never hardcode secret
+        # values here.
         env:
           RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
           RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
           RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
           RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         run: |
+          if [ -z "$RELEASE_KEYSTORE_BASE64" ]; then
+            echo "RELEASE_* secrets not configured — skipping keystore decode;"
+            echo "gradle falls back to DEBUG signing (AAB not valid for Play upload)."
+            exit 0
+          fi
           echo "$RELEASE_KEYSTORE_BASE64" | base64 --decode > android/app/upload-keystore.jks
           cat > android/key.properties <<EOF
           storePassword=${RELEASE_STORE_PASSWORD}
