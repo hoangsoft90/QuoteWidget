@@ -220,10 +220,12 @@ void main() {
           greaterThan(DateTime.now().millisecondsSinceEpoch));
     });
 
-    test('daily schedule pins today + daily index on first sync', () async {
+    test('daily schedule pins today + daily index + ITEM ID on first sync',
+        () async {
       final calls = mockHomeWidgetChannel();
       final col = await storage.createCollection('Vocab');
-      await storage.createItem(collectionId: col.id, text: 'X', order: 0);
+      final x =
+          await storage.createItem(collectionId: col.id, text: 'X', order: 0);
       final config = await storage.createWidgetConfig(
         collectionId: col.id,
         schedule: ScheduleMode.daily,
@@ -244,6 +246,157 @@ void main() {
       final today = RotationService().localDateKey(DateTime.now());
       expect(saved('widget_6_daily_date'), today);
       expect(saved('widget_6_daily_index'), '0');
+      expect(saved('widget_6_daily_item_id'), x.id,
+          reason: 'P1-2: the daily pin must be tracked by ITEM ID, not only by '
+              'an index (index alone drifts after a mid-day delete/reorder)');
+    });
+  });
+
+  group('P1-2: daily pin stays stable when the pool changes mid-day', () {
+    late Directory tempDir;
+    late StorageService storage;
+
+    setUp(() async {
+      SharedPreferences.setMockInitialValues({});
+      tempDir = await Directory.systemTemp.createTemp('p12_daily_');
+      storage = StorageService();
+      await storage.init(testPath: tempDir.path);
+    });
+
+    tearDown(() async {
+      await storage.clearAll();
+      await tempDir.delete(recursive: true);
+    });
+
+    /// Seed "today's pin = [pinned]" exactly as an earlier sync/Kotlin would
+    /// have persisted it, then re-sync to exercise the SAME-DAY logic.
+    Future<void> seedPin({
+      required int appWidgetId,
+      required String dailyDate,
+      required String pinnedId,
+      required int pinnedIndex,
+    }) async {
+      final p = 'widget_${appWidgetId}_';
+      await HomeWidget.saveWidgetData('${p}daily_date', dailyDate);
+      await HomeWidget.saveWidgetData('${p}daily_item_id', pinnedId);
+      await HomeWidget.saveWidgetData('${p}daily_index', pinnedIndex.toString());
+    }
+
+    test('deleting ANOTHER item keeps today\'s pinned quote (id stable, index '
+        're-derived)', () async {
+      mockStatefulHomeWidgetChannel();
+      final col = await storage.createCollection('Col');
+      final a =
+          await storage.createItem(collectionId: col.id, text: 'A', order: 0);
+      await storage.createItem(collectionId: col.id, text: 'B', order: 1);
+      final c =
+          await storage.createItem(collectionId: col.id, text: 'C', order: 2);
+      final config = await storage.createWidgetConfig(
+        collectionId: col.id,
+        schedule: ScheduleMode.daily,
+      );
+      final service = WidgetService(storage);
+      final today = RotationService().localDateKey(DateTime.now());
+
+      await seedPin(
+        appWidgetId: 8,
+        dailyDate: today,
+        pinnedId: c.id,
+        pinnedIndex: 2,
+      );
+
+      // Mid-day: user deletes item A (NOT the pinned C).
+      await storage.deleteItem(a.id);
+      await service.syncWidgetData(config, appWidgetId: 8);
+
+      expect(await HomeWidget.getWidgetData<String>('widget_8_daily_date'),
+          today,
+          reason: 'same day — daily_date unchanged');
+      expect(await HomeWidget.getWidgetData<String>('widget_8_daily_item_id'),
+          c.id,
+          reason: 'C still exists → stays today\'s pinned quote');
+      expect(await HomeWidget.getWidgetData<String>('widget_8_daily_index'),
+          '1',
+          reason: 'pool is now [B, C] → C\'s index re-derived from 2 to 1');
+    });
+
+    test('deleting today\'s pinned item re-pins a replacement (same date)',
+        () async {
+      mockStatefulHomeWidgetChannel();
+      final col = await storage.createCollection('Col');
+      await storage.createItem(collectionId: col.id, text: 'A', order: 0);
+      await storage.createItem(collectionId: col.id, text: 'B', order: 1);
+      final c =
+          await storage.createItem(collectionId: col.id, text: 'C', order: 2);
+      final config = await storage.createWidgetConfig(
+        collectionId: col.id,
+        schedule: ScheduleMode.daily,
+      );
+      final service = WidgetService(storage);
+      final today = RotationService().localDateKey(DateTime.now());
+
+      await seedPin(
+        appWidgetId: 9,
+        dailyDate: today,
+        pinnedId: c.id,
+        pinnedIndex: 2,
+      );
+
+      // Mid-day: the pinned item C itself is deleted.
+      await storage.deleteItem(c.id);
+      await service.syncWidgetData(config, appWidgetId: 9);
+
+      expect(await HomeWidget.getWidgetData<String>('widget_9_daily_date'),
+          today,
+          reason: 'a replacement is chosen for TODAY — daily_date must not '
+              'advance');
+      final newId =
+          await HomeWidget.getWidgetData<String>('widget_9_daily_item_id');
+      final newIndex =
+          await HomeWidget.getWidgetData<String>('widget_9_daily_index');
+      expect(newId, isNotEmpty,
+          reason: 'a replacement item must be pinned');
+      expect(newId, isNot(c.id),
+          reason: 'the deleted item cannot stay pinned');
+      final pool = storage.getItemsForCollection(col.id); // [A, B]
+      expect(pool[int.parse(newIndex!)].id, newId,
+          reason: 'daily_index must point at the newly pinned item');
+      expect(
+          await HomeWidget.getWidgetData<String>('widget_9_currentIndex'),
+          newIndex,
+          reason: 'the replacement shows immediately');
+    });
+
+    test('a PAST daily_date is left to native rollover — yesterday\'s id is '
+        'never resurrected as today\'s pin by a Flutter sync', () async {
+      mockStatefulHomeWidgetChannel();
+      final col = await storage.createCollection('Col');
+      final c =
+          await storage.createItem(collectionId: col.id, text: 'C', order: 0);
+      final config = await storage.createWidgetConfig(
+        collectionId: col.id,
+        schedule: ScheduleMode.daily,
+      );
+      final service = WidgetService(storage);
+
+      // Yesterday's pin (id = C) is stale: native advances the day and clears
+      // daily_item_id when it renders — the Flutter sync must NOT claim C as
+      // today's pin while daily_date is still in the past.
+      await seedPin(
+        appWidgetId: 10,
+        dailyDate: '2000-01-01',
+        pinnedId: c.id,
+        pinnedIndex: 0,
+      );
+      await service.syncWidgetData(config, appWidgetId: 10);
+
+      expect(await HomeWidget.getWidgetData<String>('widget_10_daily_date'),
+          '2000-01-01',
+          reason: 'day rollover is owned by the native render — sync leaves the '
+              'stale date untouched instead of silently rewriting it');
+      expect(await HomeWidget.getWidgetData<String>('widget_10_daily_item_id'),
+          c.id,
+          reason: 'untouched too — Kotlin clears it when IT advances the day');
     });
   });
 

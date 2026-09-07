@@ -35,22 +35,31 @@ class AddWidgetGuideScreen extends StatefulWidget {
 class _AddWidgetGuideScreenState extends State<AddWidgetGuideScreen> {
   WidgetGuide? _guide;
   bool _isLoading = true;
-  bool _pinRequested = false;
   bool _pinSupported = false;
 
   @override
   void initState() {
     super.initState();
     _loadGuide();
-    _tryPinWidget();
+    // P2-3: probe device support only — never request a pin on open. The
+    // system pin dialog must appear ONLY when the user taps the button below.
+    _probePinSupport();
+  }
+
+  /// P2-3: pure platform query (no dialog) — decides whether the quick-add
+  /// button is shown at all.
+  Future<void> _probePinSupport() async {
+    final supported = await widget.widgetService.isRequestPinSupported();
+    if (mounted) setState(() => _pinSupported = supported);
   }
 
   Future<void> _tryPinWidget() async {
     final supported = await widget.widgetService.requestPinWidget();
-    setState(() {
-      _pinRequested = true;
-      _pinSupported = supported;
-    });
+    if (mounted) {
+      setState(() {
+        _pinSupported = supported;
+      });
+    }
   }
 
   Future<void> _loadGuide() async {
@@ -181,8 +190,9 @@ class _AddWidgetGuideScreenState extends State<AddWidgetGuideScreen> {
                     const SizedBox(height: 32),
                   ],
 
-                  // Auto-add button (if supported)
-                  if (_pinRequested && _pinSupported) ...[
+                  // Quick-add button (only when the device supports pinning;
+                  // pressing it is what triggers the system pin dialog).
+                  if (_pinSupported) ...[
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton.icon(

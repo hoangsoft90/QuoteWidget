@@ -114,6 +114,7 @@ class QuoteWidgetProvider : AppWidgetProvider() {
                 .remove("${prefix}_shuffle_source_fp")
                 .remove("${prefix}_daily_date")
                 .remove("${prefix}_daily_index")
+                .remove("${prefix}_daily_item_id")
                 .remove("${prefix}_next_rotation_at")
                 .remove("${prefix}_textColor")
                 .remove("${prefix}_backgroundColor")
@@ -136,6 +137,7 @@ class QuoteWidgetProvider : AppWidgetProvider() {
                 .remove("flutter.${prefix}_shuffle_source_fp")
                 .remove("flutter.${prefix}_daily_date")
                 .remove("flutter.${prefix}_daily_index")
+                .remove("flutter.${prefix}_daily_item_id")
                 .remove("flutter.${prefix}_next_rotation_at")
                 .remove("flutter.${prefix}_textColor")
                 .remove("flutter.${prefix}_backgroundColor")
@@ -205,7 +207,8 @@ class QuoteWidgetProvider : AppWidgetProvider() {
                 "totalItems", "rotationMode", "items", "contentFilter",
                 "schedule", "tapAction", "shuffle_bag", "shuffle_index",
                 "shuffle_source_fp", "daily_date", "daily_index",
-                "next_rotation_at", "textColor", "backgroundColor",
+                "daily_item_id", "next_rotation_at", "textColor",
+                "backgroundColor",
                 "fontSize", "sizeCategory", "showProgress"
             )) {
                 editor.remove("${prefix}_$key")
@@ -696,9 +699,14 @@ class QuoteWidgetProvider : AppWidgetProvider() {
                     // New day → pick the day's item (avoid yesterday's).
                     val yesterday = getInt(context, "${prefix}_daily_index", -1)
                     val next = nextForDaily(totalItems, rotationMode, yesterday, context, prefix, currentIndex)
+                    // P1-2: clear daily_item_id on a NATIVE day advance. The id
+                    // belongs to the previous day's pin (native has no item-id
+                    // mapping to refresh it); leaving it would let a later Flutter
+                    // same-day revalidation resurrect yesterday's item as today's.
                     hwPrefs.edit()
                         .putString("${prefix}_daily_date", today)
                         .putString("${prefix}_daily_index", next.toString())
+                        .putString("${prefix}_daily_item_id", "")
                         .putString("${prefix}_currentIndex", next.toString())
                         .apply()
                     return next

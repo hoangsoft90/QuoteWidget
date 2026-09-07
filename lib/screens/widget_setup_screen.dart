@@ -82,14 +82,55 @@ class _WidgetSetupScreenState extends State<WidgetSetupScreen> {
     }
   }
 
-  Future<void> _saveAndNavigateToDetail() async {
-    if (_selectedCollection == null || _saving) return;
-    setState(() => _saving = true);
-
-    // Create WidgetConfig (throws WidgetLimitReachedException for Free 2nd)
-    WidgetConfig config;
+  /// P1-3: run the post-create chain — registerWidgetMapping →
+  /// syncWidgetData → updateWidget. If ANY step after [createWidgetConfig]
+  /// fails, roll the freshly-created config back ([unbindWidgetConfig]:
+  /// Hive config + partial wcfg_* mapping + native registry/display data)
+  /// so a half-configured setup never leaves a phantom config behind.
+  /// Returns false when the setup failed (config already rolled back).
+  Future<bool> _bindWidget(WidgetConfig config) async {
     try {
-      config = await widget.storageService.createWidgetConfig(
+      // Register mapping: appWidgetId ↔ configId
+      await WidgetDataBridge.registerWidgetMapping(
+        appWidgetId: widget.appWidgetId,
+        configId: config.id,
+      );
+
+      // Sync data to HomeWidgetPreferences so Kotlin can read it
+      await widget.widgetService.syncWidgetData(
+        config,
+        appWidgetId: widget.appWidgetId,
+      );
+
+      // Trigger widget refresh
+      await HomeWidget.updateWidget(
+        name: 'QuoteWidgetProvider',
+        androidName: 'QuoteWidgetProvider',
+      );
+      return true;
+    } catch (_) {
+      // Rollback: reuse the existing full unbind (never writes new delete
+      // logic) — safe both when the mapping already ran and when it didn't.
+      await widget.storageService.unbindWidgetConfig(config.id);
+      return false;
+    }
+  }
+
+  /// P1-3: honest failure feedback — never leave the screen hanging or claim
+  /// success when the widget could not be set up.
+  void _showSetupError() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Không thể thiết lập widget, vui lòng thử lại')),
+    );
+  }
+
+  /// Shared setup head: create the WidgetConfig (honoring the Free-limit
+  /// gate). Returns null when the limit blocked the creation (caller shows
+  /// the unlock dialog). Throws for any other create failure.
+  Future<WidgetConfig?> _createConfig() async {
+    try {
+      return await widget.storageService.createWidgetConfig(
         collectionId: _selectedCollection!.id,
         contentFilter:
             _favoritesOnly ? ContentFilter.favoritesOnly : ContentFilter.all,
@@ -98,28 +139,29 @@ class _WidgetSetupScreenState extends State<WidgetSetupScreen> {
         tapAction: _tapAction,
       );
     } on WidgetLimitReachedException {
+      return null;
+    }
+  }
+
+  Future<void> _saveAndNavigateToDetail() async {
+    if (_selectedCollection == null || _saving) return;
+    setState(() => _saving = true);
+
+    // Create WidgetConfig (throws WidgetLimitReachedException for Free 2nd)
+    final config = await _createConfig();
+    if (config == null) {
       if (mounted) setState(() => _saving = false);
       await _showUnlockDialog();
       return;
     }
 
-    // Register mapping
-    await WidgetDataBridge.registerWidgetMapping(
-      appWidgetId: widget.appWidgetId,
-      configId: config.id,
-    );
-
-    // Sync data
-    await widget.widgetService.syncWidgetData(
-      config,
-      appWidgetId: widget.appWidgetId,
-    );
-
-    // Trigger widget refresh
-    await HomeWidget.updateWidget(
-      name: 'QuoteWidgetProvider',
-      androidName: 'QuoteWidgetProvider',
-    );
+    // P1-3: bind + sync with rollback on any post-create failure.
+    final bound = await _bindWidget(config);
+    if (!bound) {
+      if (mounted) setState(() => _saving = false);
+      _showSetupError();
+      return;
+    }
 
     // Clear tapped ids
     final prefs = await SharedPreferences.getInstance();
@@ -145,39 +187,20 @@ class _WidgetSetupScreenState extends State<WidgetSetupScreen> {
     setState(() => _saving = true);
 
     // Create WidgetConfig (throws WidgetLimitReachedException for Free 2nd)
-    WidgetConfig config;
-    try {
-      config = await widget.storageService.createWidgetConfig(
-        collectionId: _selectedCollection!.id,
-        contentFilter:
-            _favoritesOnly ? ContentFilter.favoritesOnly : ContentFilter.all,
-        rotationMode: _rotationMode,
-        schedule: _schedule,
-        tapAction: _tapAction,
-      );
-    } on WidgetLimitReachedException {
+    final config = await _createConfig();
+    if (config == null) {
       if (mounted) setState(() => _saving = false);
       await _showUnlockDialog();
       return;
     }
 
-    // Register mapping: appWidgetId ↔ configId
-    await WidgetDataBridge.registerWidgetMapping(
-      appWidgetId: widget.appWidgetId,
-      configId: config.id,
-    );
-
-    // Sync data to HomeWidgetPreferences so Kotlin can read it
-    await widget.widgetService.syncWidgetData(
-      config,
-      appWidgetId: widget.appWidgetId,
-    );
-
-    // Trigger widget refresh
-    await HomeWidget.updateWidget(
-      name: 'QuoteWidgetProvider',
-      androidName: 'QuoteWidgetProvider',
-    );
+    // P1-3: bind + sync with rollback on any post-create failure.
+    final bound = await _bindWidget(config);
+    if (!bound) {
+      if (mounted) setState(() => _saving = false);
+      _showSetupError();
+      return;
+    }
 
     // Clear the tapped_widget_id
     final prefs = await SharedPreferences.getInstance();

@@ -3,7 +3,6 @@ import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import '../models/collection_model.dart';
 import '../models/item_model.dart';
-import '../models/widget_config_model.dart';
 import '../models/backup_data.dart';
 import 'storage_service.dart';
 
@@ -11,11 +10,18 @@ class SnapshotManager {
   static const int _maxSnapshots = 3;
   static const String _snapshotDirName = 'safety_snapshots';
 
-  /// Create a safety snapshot of current data
+  /// Create a safety snapshot of current data.
+  ///
+  /// Final Hardening P0-1: snapshots carry Collections + Items ONLY. A
+  /// WidgetConfig is device-bound (it needs a live physical widget + a
+  /// `wcfg_*` mapping to be meaningful). The snapshot cannot capture the
+  /// physical widget, and the mapping may have been removed by the time the
+  /// snapshot is restored — re-inserting configs blindly creates phantom
+  /// Hive configs that distort the Free-limit gate. Same V1 semantics the
+  /// official backup path already uses (BackupService drops configs).
   Future<String> createSnapshot({
     required List<Collection> collections,
     required List<Item> items,
-    required List<WidgetConfig> widgetConfigs,
   }) async {
     final directory = await _getApplicationDocumentsDirectory();
     final snapshotDir = Directory('${directory.path}/$_snapshotDirName');
@@ -24,11 +30,11 @@ class SnapshotManager {
       await snapshotDir.create(recursive: true);
     }
 
-    // Create backup data
+    // Create backup data (widget configs are never part of a snapshot).
     final backup = BackupData.create(
       collections: collections,
       items: items,
-      widgetConfigs: widgetConfigs,
+      widgetConfigs: const [],
     );
 
     final json = jsonEncode(backup.toJson());
@@ -85,10 +91,15 @@ class SnapshotManager {
 
     final backup = BackupData.fromJson(data);
 
+    // P0-1: NEVER restore widget configs from a snapshot — even a legacy
+    // snapshot file that still embeds configs must not re-insert them (no
+    // physical widget / possibly-removed mapping → phantom config). Content
+    // only: the physical widgets on the Home Screen keep rendering their own
+    // native display data untouched.
     await storageService.restoreFromBackup(
       collections: backup.collections,
       items: backup.items,
-      widgetConfigs: backup.widgetConfigs,
+      widgetConfigs: const [],
     );
   }
 

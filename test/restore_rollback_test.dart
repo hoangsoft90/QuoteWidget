@@ -229,4 +229,67 @@ void main() {
     expect(storage.getAllCollections().length, 1);
     expect(storage.getAllCollections().first.name, 'Solo');
   });
+
+  group('Final Hardening P0-1: snapshot restore never recreates phantom configs',
+      () {
+    test('snapshot FILE carries no widget configs (content only)', () async {
+      final storage = StorageService();
+      await storage.init(testPath: '${tempDir.path}/hive_p01a');
+      await storage.clearAll(); // defensive: Hive boxes are shared per file
+      final col = await storage.createCollection('Col');
+      await storage.createItem(
+          collectionId: col.id, text: 'quote', order: 0);
+      await storage.createWidgetConfig(collectionId: col.id);
+      expect(storage.getAllWidgetConfigs(), hasLength(1));
+
+      final sm = SnapshotManager();
+      final path = await sm.createSnapshot(
+        collections: storage.getAllCollections(),
+        items: storage.getAllItems(),
+      );
+      final json = jsonDecode(await File(path).readAsString())
+          as Map<String, dynamic>;
+      expect(json['widgetConfigs'] as List, isEmpty,
+          reason: 'P0-1: a snapshot must be content-only — a WidgetConfig is '
+              'device-bound and cannot be safely restored without its physical '
+              'widget / mapping');
+    });
+
+    test('restore after the config was unbound does NOT resurrect it',
+        () async {
+      final storage = StorageService();
+      await storage.init(testPath: '${tempDir.path}/hive_p01b');
+      await storage.clearAll(); // defensive: Hive boxes are shared per file
+      final col = await storage.createCollection('Col');
+      await storage.createItem(
+          collectionId: col.id, text: 'quote', order: 0);
+      final config = await storage.createWidgetConfig(collectionId: col.id);
+      expect(storage.getAllWidgetConfigs(), hasLength(1));
+
+      // Destructive op #1: safety snapshot taken while the config exists.
+      final sm = SnapshotManager();
+      final path = await sm.createSnapshot(
+        collections: storage.getAllCollections(),
+        items: storage.getAllItems(),
+      );
+
+      // Before the snapshot is restored, the config gets unbound (the
+      // physical widget was removed / reconcile dropped it).
+      await storage.unbindWidgetConfig(config.id);
+      expect(storage.getAllWidgetConfigs(), isEmpty);
+
+      // Destructive op #2 wipes everything; user rolls back from the snapshot.
+      await storage.clearAll();
+      await sm.restoreFromSnapshot(path, storage);
+
+      expect(storage.getAllCollections().map((c) => c.name), ['Col'],
+          reason: 'collections restored as they were');
+      expect(storage.getAllItems().map((i) => i.text), ['quote'],
+          reason: 'items restored as they were');
+      expect(storage.getAllWidgetConfigs(), isEmpty,
+          reason: 'P0-1: restoring a snapshot must NOT re-insert a config '
+              'whose physical widget/mapping is gone — that is a phantom '
+              'config that distorts the Free-limit gate');
+    });
+  });
 }

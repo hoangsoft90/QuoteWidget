@@ -97,21 +97,56 @@ class WidgetService {
       }
     }
     if (config.schedule == ScheduleMode.daily) {
-      final existing = await HomeWidget.getWidgetData<String>('${prefix}_daily_date');
-      if (existing == null || existing.isEmpty) {
-        // Pin today's item on first daily activation (features_final §3.1).
-        final today = RotationService().localDateKey(DateTime.now());
+      final today = RotationService().localDateKey(DateTime.now());
+      final dailyDate =
+          await HomeWidget.getWidgetData<String>('${prefix}_daily_date');
+      if (dailyDate == null || dailyDate.isEmpty) {
+        // First daily activation (features_final §3.1): pin today's item.
         final itemIds = items.map((Item i) => i.id).toList();
         final idx = RotationService().dailyIndexForToday(
           itemIds: itemIds,
           previousDailyId: null,
         );
         await HomeWidget.saveWidgetData('${prefix}_daily_date', today);
-        await HomeWidget.saveWidgetData('${prefix}_daily_index', idx.toString());
-        if (idx >= 0 && idx < items.length) {
-          await HomeWidget.saveWidgetData('${prefix}_currentIndex', idx.toString());
+        await _pinDailyItem(prefix, items, idx);
+      } else if (dailyDate == today) {
+        // P1-2: SAME day — today's quote must stay stable even when the pool
+        // changed (an item deleted or reordered mid-day must not silently
+        // shift the pinned quote to a different one). The pin is tracked by
+        // ITEM ID (`daily_item_id`), not just an index.
+        final pinnedId =
+            await HomeWidget.getWidgetData<String>('${prefix}_daily_item_id');
+        // Empty/absent id = the pin was chosen natively (Kotlin advanced the
+        // day without a Flutter round-trip, or a legacy pre-P1-2 install) —
+        // native has no id mapping, so leave its index pin untouched.
+        if (pinnedId != null && pinnedId.isNotEmpty) {
+          final currentIdx = items.indexWhere((i) => i.id == pinnedId);
+          final storedIdx = int.tryParse(
+                  await HomeWidget.getWidgetData<String>(
+                          '${prefix}_daily_index') ??
+                  '') ??
+              -1;
+          if (currentIdx >= 0) {
+            // Pinned item still exists → keep it. Only refresh the INDEX if
+            // a reorder shifted it (Kotlin snaps to daily_index on refresh).
+            if (storedIdx != currentIdx) {
+              await HomeWidget.saveWidgetData(
+                  '${prefix}_daily_index', currentIdx.toString());
+            }
+          } else {
+            // Pinned item deleted → pick a replacement for TODAY. Keep the
+            // same daily_date (this is not a new day).
+            final itemIds = items.map((Item i) => i.id).toList();
+            final idx = RotationService().dailyIndexForToday(
+              itemIds: itemIds,
+              previousDailyId: pinnedId,
+            );
+            await _pinDailyItem(prefix, items, idx);
+          }
         }
       }
+      // dailyDate in the past → native advances the day on the next render
+      // (resolveScheduleIndex), unchanged.
     }
     await HomeWidget.saveWidgetData('${prefix}_theme', config.appearance.theme);
     await HomeWidget.saveWidgetData('${prefix}_fontSize', config.appearance.fontSize.toString());
@@ -135,6 +170,20 @@ class WidgetService {
       name: 'QuoteWidgetProvider',
       androidName: 'QuoteWidgetProvider',
     );
+  }
+
+  /// P1-2: persist today's daily pin — index AND item id. The id is what
+  /// keeps today's quote stable when the pool changes mid-day (index alone
+  /// can silently point at a different item after a delete/reorder).
+  Future<void> _pinDailyItem(String prefix, List<Item> items, int idx) async {
+    await HomeWidget.saveWidgetData('${prefix}_daily_index', idx.toString());
+    final id = (idx >= 0 && idx < items.length) ? items[idx].id : '';
+    await HomeWidget.saveWidgetData('${prefix}_daily_item_id', id);
+    if (idx >= 0 && idx < items.length) {
+      // Show the freshly pinned item immediately (also overrides a stale
+      // index when the previous pin was deleted).
+      await HomeWidget.saveWidgetData('${prefix}_currentIndex', idx.toString());
+    }
   }
 
   /// Phase 2B: (re)build the persisted shuffle bag when the source changed
@@ -260,6 +309,17 @@ class WidgetService {
         androidName: 'QuoteWidgetProvider',
       );
       return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /// P2-3: pure platform query — whether THIS device/launcher supports
+  /// programmatic widget pinning. No dialog is shown (unlike
+  /// [requestPinWidget]); used to show/hide the quick-add button.
+  Future<bool> isRequestPinSupported() async {
+    try {
+      return await HomeWidget.isRequestPinWidgetSupported() ?? false;
     } catch (e) {
       return false;
     }

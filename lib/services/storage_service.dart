@@ -147,12 +147,14 @@ class StorageService {
 
     final copy = Collection.create(name: copyName);
     final sourceItems = getItemsForCollection(sourceId);
-    // Item.create generates fresh ids; then carry over the favorite flag.
+    // Item.create generates fresh ids; then carry over the favorite flag and
+    // the author (P2-1: a duplicated quote must keep its attribution).
     final copiedItems = sourceItems.map((item) {
       final copyItem = Item.create(
         collectionId: copy.id,
         text: item.text,
         order: item.order,
+        author: item.author,
       );
       copyItem.favorite = item.favorite;
       return copyItem;
@@ -194,11 +196,12 @@ class StorageService {
   Future<void> deleteCollection(String id) async {
     // Safety snapshot before destructive operation (plan §2) — captured while
     // the collection is still active so it can be restored from the snapshot.
+    // P0-1: content only — WidgetConfigs are never snapshotted (device-bound;
+    // restoring them blindly creates phantom configs with no physical widget).
     if (_snapshotManager != null) {
       await _snapshotManager!.createSnapshot(
         collections: getAllCollections(),
         items: getAllItems(),
-        widgetConfigs: getAllWidgetConfigs(),
       );
     }
 

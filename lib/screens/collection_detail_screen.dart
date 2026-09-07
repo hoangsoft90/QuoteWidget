@@ -259,10 +259,32 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
     widget.widgetService.updateWidgetsForCollection(widget.collection.id);
   }
 
+  /// P1-1: reordering is only safe on the FULL ordered collection. While the
+  /// favorites-only filter or a search is active, `_items` is a SUBSET —
+  /// persisting the subset's order would renumber only the visible items and
+  /// silently corrupt the order of every item hidden by the filter.
+  bool get _filterActive => _favoritesOnly || _searchQuery.trim().isNotEmpty;
+
+  /// P1-1: short notice shown when the user tries to reorder while search /
+  /// favorites filter is active (drag handles are disabled in that state).
+  void _showReorderDisabledSnack() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(const SnackBar(
+        content: Text('Tắt tìm kiếm/lọc để sắp xếp lại thứ tự'),
+      ));
+  }
+
   /// A5a: reorder handler — delegates to [reorderAndSyncItems] so the full
   /// flow (Hive order write + immediate widget re-sync) is testable without
-  /// pumping the widget tree.
+  /// pumping the widget tree. P1-1: guarded — while a filter/search is active
+  /// the subset order must never be persisted.
   Future<void> handleReorder(int fromIndex, int toIndex) async {
+    if (_filterActive) {
+      _showReorderDisabledSnack();
+      return;
+    }
     final reordered = await reorderAndSyncItems(
       storageService: widget.storageService,
       widgetService: widget.widgetService,
@@ -548,9 +570,16 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
   }
 
   Widget _buildItemList() {
+    // P1-1: drag handles are only active on the full, unfiltered collection.
+    final reorderEnabled = !_filterActive;
+
     return ReorderableListView.builder(
       padding: const EdgeInsets.all(8),
       itemCount: _items.length,
+      // No default handles: enabled mode wraps each tile in an explicit
+      // long-press listener (below); disabled mode shows a static handle that
+      // explains why sorting is off when tapped.
+      buildDefaultDragHandles: false,
       onReorderItem: (int fromIndex, int toIndex) {
         // onReorderItem already adjusts newIndex for the removed item — no
         // manual correction needed (unlike the deprecated onReorder).
@@ -559,11 +588,19 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
       itemBuilder: (context, index) {
         final item = _items[index];
 
-        return Card(
-          key: ValueKey(item.id),
+        // ReorderableListView asserts that every item returned by the builder
+        // has a key, so the key lives on the OUTER widget (drag listener when
+        // reorder is enabled, a keyed wrapper when it is disabled).
+        final card = Card(
           margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
           child: ListTile(
-            leading: const Icon(Icons.drag_handle),
+            leading: reorderEnabled
+                ? const Icon(Icons.drag_handle)
+                : IconButton(
+                    icon: const Icon(Icons.drag_handle, color: Colors.grey),
+                    tooltip: 'Sorting is off while searching/filtering',
+                    onPressed: _showReorderDisabledSnack,
+                  ),
             title: Text(
               item.text,
               maxLines: 2,
@@ -625,6 +662,16 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
             onTap: () => _showEditItemDialog(item),
           ),
         );
+        if (reorderEnabled) {
+          // Whole-tile long-press reorder (matches the default mobile UX) —
+          // only present when NO filter/search is active (P1-1).
+          return ReorderableDelayedDragStartListener(
+            key: ValueKey(item.id),
+            index: index,
+            child: card,
+          );
+        }
+        return KeyedSubtree(key: ValueKey(item.id), child: card);
       },
     );
   }

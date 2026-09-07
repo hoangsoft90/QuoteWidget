@@ -147,7 +147,6 @@ class BackupService {
         await _snapshotManager.createSnapshot(
           collections: _storageService.getAllCollections(),
           items: _storageService.getAllItems(),
-          widgetConfigs: _storageService.getAllWidgetConfigs(),
         );
 
         try {

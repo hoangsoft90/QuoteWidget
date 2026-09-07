@@ -228,6 +228,22 @@ void main() {
       final copy = await service.duplicateCollection(src.id);
       expect(service.getItemsForCollection(copy.id), isEmpty);
     });
+
+    test('P2-1: duplicated items keep the author attribution', () async {
+      final src = await service.createCollection('Quotes');
+      await service.createItem(
+          collectionId: src.id, text: 'Quote A', order: 0, author: 'Thoreau');
+      await service.createItem(
+          collectionId: src.id, text: 'Quote B', order: 1);
+
+      final copy = await service.duplicateCollection(src.id);
+
+      final copiedItems = service.getItemsForCollection(copy.id);
+      expect(copiedItems[0].author, 'Thoreau',
+          reason: 'P2-1: the copy must keep the source quote\'s author');
+      expect(copiedItems[1].author, isNot('Thoreau'),
+          reason: 'author must come from the matching source item');
+    });
   });
 
   group('Bulk add', () {
