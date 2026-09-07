@@ -156,7 +156,7 @@
 - [ ] **Version bump** — bạn muốn versionName+versionCode là bao nhiêu trước production (vd 1.0.0 → 1.0.1 / 1.1.0)?
 - [x] **AAB artifact** — ✅ ĐÃ SHIP (release-engineering Task 2): step `Build release AAB` + `Upload AAB artifact` trong `.github/workflows/build-debug-apk.yml`, dùng chung input `test_ads`, APK step giữ nguyên cho QA candidate
 - [x] **Release signing config** — ✅ ĐÃ SHIP (Task 1): `android/app/build.gradle.kts` đọc `android/key.properties` nếu tồn tại, fallback debug signing + warning nếu không (CI/build local không bao giờ fail); template `android/key.properties.example` đã commit; thật `key.properties`/`upload-keystore.jks` bị gitignore (root + android)
-- [x] **CI keystore decode step** — ✅ ĐÃ SHIP (Task 4): step `Decode release keystore from CI secrets` chỉ chạy khi secrets tồn tại (`if: secrets.RELEASE_KEYSTORE_BASE64 != ''`), decode base64 → `android/app/upload-keystore.jks` + sinh `android/key.properties` trên runner
+- [x] **CI keystore decode step** — ✅ ĐÃ SHIP (Task 4): step `Decode release keystore from CI secrets` decode base64 → `android/app/upload-keystore.jks` + sinh `android/key.properties` trên runner. **Lưu ý (fix `e1a0060` sau review):** gate bằng `if: secrets.X != ''` là KHÔNG đáng tin (GitHub docs: secrets không dùng được trong `if:`) → step luôn chạy, gate nằm TRONG script qua env (`[ -z "$RELEASE_KEYSTORE_BASE64" ] → exit 0`), secrets được wire qua step-level `env:`
 - [ ] **Cần user làm (không thể agent tự làm):**
   1. Tạo keystore thật: `keytool -genkey -v -keystore upload-keystore.jks -keyalg RSA -keysize 2048 -validity 10000 -alias upload` (lưu password an toàn, không gửi qua chat)
   2. Điền `android/key.properties` thật trên máy local (dùng `.example` làm mẫu) — không commit
@@ -188,3 +188,4 @@
 4. ~~Release signing pattern?~~ → ✅ config đã ship (Task 1, chuẩn key.properties của Flutter docs); còn lại việc tạo keystore + secrets là của user (4 bước trong section trên)
 5. **Privacy URL live** — verify `https://hoangsoft90.github.io/QuoteWidget/privacy.html` resolving?
 6. **Revoke PAT cũ** trên GitHub Settings → Developer settings (agent đã dọn token khỏi remote URL, nhưng token cũ vẫn còn hiệu lực cho tới khi bạn revoke)
+7. **Cấu hình credential mới để push** — sau khi dọn PAT khỏi remote URL (Task 3), `git push` cần SSH key hoặc fine-grained PAT mới; commit `70deddb` + `e1a0060` (release engineering + CI fix) đang local ahead 2

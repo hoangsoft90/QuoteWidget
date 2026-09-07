@@ -2,7 +2,7 @@
 
 > Tài liệu đầy đủ tính năng + UI của app, đối chiếu trực tiếp với source code.
 > **Canonical feature spec: `.plan/features_final.md`** (thắng nếu lệch — Phase 1 P0-1).
-> Cập nhật lần cuối: **2026-09-07** (Feature Close Batch đã commit `c3b6f73` + push; 2 commit cleanup prefs-hygiene `f54623f` + `1fff5bc`; analyze 0 issue, 159/159 tests pass).
+> Cập nhật lần cuối: **2026-09-07** (Feature Close Batch `c3b6f73` + push; cleanup prefs `f54623f`/`1fff5bc`; release-engineering batch `70deddb` — signing config + CI AAB — và fix CI `e1a0060`; analyze 0 issue, 159/159 tests pass; `70deddb`+`e1a0060` local ahead 2 chờ credential).
 > ⚠️ **FEATURE FREEZE 2026-09-06** — chỉ nhận bugfix + Device QA, không feature mới tới CLOSED_TESTING_OK (Deferred V1.1: `features_final.md` §8).
 
 **App:** Hiển thị nội dung cá nhân (quote, từ vựng, lời nhắc…) trên Home Screen widget Android.
@@ -186,7 +186,7 @@
 - **targetSdk/compileSdk 36** (yêu cầu Google Play 31/8/2026) · AGP 8.11.1 · Gradle 8.14.3 · Kotlin 2.2.20 · Java 17.
 - **Cleartext HTTP:** `network_security_config.xml` (base-config cleartextTrafficPermitted=true) + manifest attribute — http hoạt động trong release APK.
 - **App icon:** adaptive (gradient + `format_quote` vector) + legacy PNG đủ mipmap.
-- **CI (GH Actions):** Flutter 3.47.1 → `flutter analyze --fatal-warnings` → `flutter test` → **build debug APK + release APK** (2 artifacts). Workflow `build-debug-apk.yml` có `workflow_dispatch` input `test_ads` (default true) để QA candidate production ads build (`--dart-define=TEST_ADS=${{ inputs.test_ads || 'true' }}`); push build giữ test ads. **QA candidate hiện tại: run 34074951700 (TEST_ADS=false, success, 2026-09-07, chứa batch c3b6f73)** — thay run cũ 33972687792.
+- **CI (GH Actions):** Flutter 3.47.1 → `flutter analyze --fatal-warnings` → `flutter test` → **decode keystore (gated)** → build debug APK + release APK + **release AAB** (3 artifacts). Workflow `build-debug-apk.yml` có `workflow_dispatch` input `test_ads` (default true) để QA candidate production ads build (`--dart-define=TEST_ADS=${{ inputs.test_ads || 'true' }}`); push build giữ test ads. **QA candidate hiện tại: run 34074951700 (TEST_ADS=false, success, 2026-09-07, chứa batch c3b6f73)** — thay run cũ 33972687792. Release signing: gradle đọc `android/key.properties` khi có (fallback debug + warn — build không bao giờ fail); CI decode step materialize key.properties + upload-keystore.jks từ secrets `RELEASE_KEYSTORE_BASE64/STORE_PASSWORD/KEY_ALIAS/KEY_PASSWORD` (gate trong script qua env — fix `e1a0060`; cho tới khi secrets có, AAB ký debug, Play từ chối upload).
 - **Theme app:** Material 3, seed `#6750A4`, light + dark.
 - **Điện thoại duy nhất:** Android-only (iOS scaffold có sẵn nhưng chưa setup ads/không trong scope).
 - **Forensic fixes (Phase 3, 2026-09-05):** 2 fix code + 1 fix CI — native-index preservation, shuffle-bag seed displayIndex, dead-key cleanup onDeleted, Kotlin compile error (shuffled() read-only List → MutableList), widget provider XML comment-location parse error.
@@ -213,6 +213,7 @@
 - **Phase 1 P0-5 (2026-09-05):** release runbook ghi `--dart-define=TEST_ADS=false` vào operating_rules.md.
 - **Phase 4 (2026-09-05):** openspec change `device-qa-gate`, CI dispatch input `test_ads`, QA candidate build 33972687792 (success, TEST_ADS=false, 30.6 MB), run sheet `.plan/device_qa_run_sheet.md`.
 - **2026-09-07 (review + cleanup):** batch commit `c3b6f73` + push; QA candidate mới = run 34074951700 (TEST_ADS=false) thay 33972687792; review thủ công (OCR unavailable fallback) + ponytail → 0 blocker; cleanup `f54623f` xóa ghi dư key rác `flutter.flutter.configured_widget_ids` (registry A3 — 1 write duy nhất, plugin tự prefix đúng key Kotlin đọc). 155/155 tests, analyze 0 issues.
+- **2026-09-07 (release engineering, `.plan/prompt_release_engineering.md`):** commit `70deddb` — Task 1 signing config (`key.properties.example`, gradle fallback debug, không throw), Task 2 CI AAB (`Build release AAB` + upload, tái dùng input `test_ads`, giữ APK steps), Task 3 dọn PAT khỏi remote URL (token-scan sạch; revoke PAT cũ là việc user), Task 4 decode-keystore step gated secrets + checklist.md. Sau review tự kiểm lại phát hiện gate `if: secrets.*` không đáng tin → fix `e1a0060` (gate trong script qua env). Bước 0 push 3 commit cleanup trước đó. 159/159 tests, analyze 0 issues. **2 commit này chưa push** (remote cần credential mới). Chi tiết: `result9.txt`.
 
 ---
 
