@@ -103,17 +103,19 @@ class WidgetDataBridge {
   static Future<void> setProExpiry(DateTime? proUnlockedUntil) async {
     final prefs = await SharedPreferences.getInstance();
     final millis = proUnlockedUntil?.millisecondsSinceEpoch ?? 0;
+    // Single write: the Dart plugin auto-prefixes keys, so this lands as
+    // flutter.is_pro_expires_at — exactly the key Kotlin's getLong fallback
+    // reads. (The previous explicit 'flutter.'-prefixed write double-prefixed
+    // into an unreadable flutter.flutter.is_pro_expires_at rubbish key.)
     await prefs.setString('is_pro_expires_at', millis.toString());
-    await prefs.setString('flutter.is_pro_expires_at', millis.toString());
   }
 
   /// Read the Pro expiry timestamp (epoch millis) — 0 = never unlocked.
+  /// The plain key auto-resolves through the plugin's flutter.-prefixed
+  /// physical entry (see [setProExpiry]); no prefixed fallback needed.
   static Future<int> getProExpiry() async {
     final prefs = await SharedPreferences.getInstance();
-    final millis = int.tryParse(prefs.getString('is_pro_expires_at') ?? '') ??
-        int.tryParse(prefs.getString('flutter.is_pro_expires_at') ?? '') ??
-        0;
-    return millis;
+    return int.tryParse(prefs.getString('is_pro_expires_at') ?? '') ?? 0;
   }
 
   /// Update all widget fields for a given appWidgetId from a data map.
