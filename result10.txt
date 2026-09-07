@@ -126,11 +126,31 @@ Test (test/add_widget_guide_pin_test.dart — mới, 1/1):
   requestPinWidget gọi đúng 1 lần  → PASS
 
 --------------------------------------------------------------------------------
+ADDENDUM — Review sau commit (tìm ra 1 crash, đã fix riêng 4dc6def)
+--------------------------------------------------------------------------------
+Finding (High): `_pinDailyItem` có thể persist `daily_index = -1` khi pool rỗng
+(first-activation trên collection rỗng — lỗi từ Phase 2B; và vector MỚI từ P1-2:
+xóa item cuối cùng trong ngày → re-pin trên pool rỗng). Kotlin same-day snap
+trên -1 → ghi `currentIndex = -1` → render `items[-1]` → IndexOutOfBounds mỗi
+lần refresh khi items được thêm lại.
+
+Fix (commit `4dc6def`):
+- Dart `_pinDailyItem`: idx không hợp lệ → KHÔNG ghi gì (`daily_date` vẫn được
+  ghi ở first-activation; `daily_item_id` cũ (stale) giữ lại để sync cùng ngày
+  sau đó re-pin đúng).
+- Kotlin: daily same-day snap chỉ persist/return index hợp lệ (0 until
+  totalItems); text selection thêm điều kiện `currentIndex >= 0` (guard bền cho
+  device đã có sẵn -1 từ bản cũ).
+- Test: +2 regression (xóa item cuối → không bao giờ -1 + add lại re-pin; cấu
+  hình daily trên collection rỗng → không index âm).
+- Gate: **172/172 tests**, analyze 0 issues.
+
+--------------------------------------------------------------------------------
 Tổng kết
 --------------------------------------------------------------------------------
 - Code: 8 file lib/ + 1 file Kotlin sửa; 3 test file mới + 3 test file mở rộng.
-- Tests: 170/170 PASS (159 cũ không vỡ + 11 mới); analyze 0 issue.
-- Commit: fix(final-hardening) — local (chưa push).
+- Tests: 172/172 PASS (159 cũ + 11 batch + 2 review-fix); analyze 0 issue.
+- Commit: fix(final-hardening) + fix(hardening-daily) 4dc6def (review finding) — local (chưa push).
 - Giới hạn trung thực: Kotlin không build-verified local (môi trường hạn chế;
   chỉ định build trên CI) — lần dispatch CI sau push là phép kiểm chứng; hành
   vi native daily_item_id chờ device QA Wave 5 (F5 daily).

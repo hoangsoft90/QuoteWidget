@@ -2,7 +2,7 @@
 
 > Ngày cập nhật: **2026-09-07**
 > ⚠️ **FEATURE FREEZE 2026-09-06** — vẫn hiệu lực. Chỉ nhận **bugfix + Device QA**, không feature mới cho tới khi `CLOSED_TESTING_OK`.
-> **Final Hardening Batch xong** (`fix(final-hardening)` — commit local): P0-1..P2-3 đủ 6 bug, **170/170 tests**, analyze 0 issues. Chi tiết: `result10.txt`. Push gộp (hardening + release-engineering) chờ credential mới từ bạn.
+> **Final Hardening Batch xong** (`fix(final-hardening)` + review-fix `4dc6def` — commit local): P0-1..P2-3 đủ 6 bug, **172/172 tests**, analyze 0 issues. Chi tiết: `result10.txt`. Push gộp (hardening + release-engineering) chờ credential mới từ bạn.
 
 ## ✅ Đã hoàn thành (gần đây nhất)
 

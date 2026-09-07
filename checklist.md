@@ -126,6 +126,7 @@
 - [x] **P2-2 — Dead code verify** — `widget_config_screen.dart` + `widget_preview.dart` **đã xóa từ trước**: `ls` No such file, grep lib/ = 0 ref, git ls-files = 0, analyze 0 issue (không import gãy). features.md/checklist.md đã ghi đúng
 - [x] **P2-3 — AddWidgetGuide không auto-pin** — bỏ `_tryPinWidget()` khỏi initState → `_probePinSupport` (query support, không dialog); nút bấm mới request pin; xóa `_pinRequested`; `WidgetService.isRequestPinSupported` mới. 1 test widget mới PASS (0 request khi mở màn, đúng 1 khi bấm nút)
 - [x] **Gate** — `flutter analyze` 0 issue, **`flutter test` 170/170** (159 cũ + 11 mới). Commit local `fix(final-hardening)` — chưa push
+- [x] **Review fix `4dc6def`** — review sau commit phát hiện crash: `_pinDailyItem` có thể persist `daily_index = -1` (pool rỗng — vector mới từ P1-2) → Kotlin snap/ render `items[-1]` (IndexOutOfBounds). Fix: Dart không ghi index âm; Kotlin snap chỉ nhận index hợp lệ + render guard `>= 0`. +2 regression test → **172/172**
 
 ### Review + QA candidate (2026-09-07)
 - [x] **Commit batch** — `c3b6f73` (35 files, +2285/−467) pushed to main; secret-scan sạch; session artifacts (handoffs/.project/skills-lock) cố tình không commit
@@ -137,7 +138,7 @@
 
 ### Verification (current state — sau Final Hardening Batch)
 - [x] `flutter analyze` — 0 errors, 0 warnings
-- [x] `flutter test` — 170/170 All tests passed (138 gốc + 17 feature-close + 4 bridge-hygiene + 11 final-hardening)
+- [x] `flutter test` — 172/172 All tests passed (138 gốc + 17 feature-close + 4 bridge-hygiene + 11 final-hardening + 2 review-fix)
 - [x] Dead code: `source/` gone, `widget_config_screen.dart`/`widget_preview.dart` deleted, 0 references
 - [x] CI green: debug APK + release APK artifact (push build) + QA candidate success (TEST_ADS=false, run 33972687792)
 - [x] Canonical feature spec `.plan/features_final.md` synced (Phase 1–2B ship, deferred ghi rõ)
