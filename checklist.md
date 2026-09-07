@@ -154,8 +154,15 @@
 
 ### Release signing / AAB / version (nếu cần upload Play Store)
 - [ ] **Version bump** — bạn muốn versionName+versionCode là bao nhiêu trước production (vd 1.0.0 → 1.0.1 / 1.1.0)?
-- [ ] **AAB artifact** — CI hiện chỉ build APK; nếu muốn đăng Play Store, thêm step `flutter build appbundle` vào workflow (cùng dispatch input test_ads)
-- [ ] **Release signing key** — cấu hình `android/key.properties` + `build.gradle` signingConfig release (hoặc play-app-signing); bạn dùng keystore nào?
+- [x] **AAB artifact** — ✅ ĐÃ SHIP (release-engineering Task 2): step `Build release AAB` + `Upload AAB artifact` trong `.github/workflows/build-debug-apk.yml`, dùng chung input `test_ads`, APK step giữ nguyên cho QA candidate
+- [x] **Release signing config** — ✅ ĐÃ SHIP (Task 1): `android/app/build.gradle.kts` đọc `android/key.properties` nếu tồn tại, fallback debug signing + warning nếu không (CI/build local không bao giờ fail); template `android/key.properties.example` đã commit; thật `key.properties`/`upload-keystore.jks` bị gitignore (root + android)
+- [x] **CI keystore decode step** — ✅ ĐÃ SHIP (Task 4): step `Decode release keystore from CI secrets` chỉ chạy khi secrets tồn tại (`if: secrets.RELEASE_KEYSTORE_BASE64 != ''`), decode base64 → `android/app/upload-keystore.jks` + sinh `android/key.properties` trên runner
+- [ ] **Cần user làm (không thể agent tự làm):**
+  1. Tạo keystore thật: `keytool -genkey -v -keystore upload-keystore.jks -keyalg RSA -keysize 2048 -validity 10000 -alias upload` (lưu password an toàn, không gửi qua chat)
+  2. Điền `android/key.properties` thật trên máy local (dùng `.example` làm mẫu) — không commit
+  3. Thêm 4 secret vào GitHub repo → Settings → Secrets and variables → Actions: `RELEASE_KEYSTORE_BASE64` (nội dung `.jks` encode base64), `RELEASE_STORE_PASSWORD`, `RELEASE_KEY_ALIAS` (= `upload`), `RELEASE_KEY_PASSWORD`
+  4. Sau khi secrets có: dispatch CI → AAB artifact `release-aab` sẽ ký bằng key thật, upload được Play Console (Closed Testing)
+  - Ghi chú: cho tới khi secrets được cấu hình, AAB trong CI ký debug key → Play sẽ từ chối upload; APK QA candidate vẫn dùng như cũ
 
 ### Polish (không block)
 - [x] Settings "About" — version động (B5 — PackageInfo)
@@ -175,8 +182,9 @@
 > **⚠️ FEATURE FREEZE (2026-09-06):** từ giờ chỉ nhận bugfix + Device QA. Không nhận feature mới cho tới khi có verdict CLOSED_TESTING_OK. Bước tiếp theo: chạy `.plan/prompt_device_qa.md` (Wave 1) trên APK build với `TEST_ADS=false`.
 
 ### Cần hỏi lại user (chờ quyết định — đã ghi trong next.md)
-1. **Push 2 commit cleanup (`f54623f` + `1fff5bc`)?** (local ahead 2 — push sẽ trigger CI; cả 2 đều no-op trên thiết bị nên không cần build lại QA candidate trừ khi bạn muốn bản build chứa mọi commit)
-2. **AAB có cần không** (chỉ APK test, hay cần AAB đăng Play Store — thêm step `flutter build appbundle` vào CI)?
+1. ~~Push cleanup commits?~~ → ✅ ĐÃ PUSH (release-engineering Bước 0: `f54623f` + `1fff5bc` + `c29e1b5` → origin/main)
+2. ~~AAB có cần không?~~ → ✅ ĐÃ SHIP (Task 2 — xem section trên)
 3. **Version bump** trước release (vd 1.0.0 → 1.0.1 / 1.1.0)?
-4. **Release signing** — `android/key.properties` + signingConfig, hay dùng play-app-signing?
+4. ~~Release signing pattern?~~ → ✅ config đã ship (Task 1, chuẩn key.properties của Flutter docs); còn lại việc tạo keystore + secrets là của user (4 bước trong section trên)
 5. **Privacy URL live** — verify `https://hoangsoft90.github.io/QuoteWidget/privacy.html` resolving?
+6. **Revoke PAT cũ** trên GitHub Settings → Developer settings (agent đã dọn token khỏi remote URL, nhưng token cũ vẫn còn hiệu lực cho tới khi bạn revoke)

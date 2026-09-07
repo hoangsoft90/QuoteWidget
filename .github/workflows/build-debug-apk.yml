@@ -55,6 +55,27 @@ jobs:
       - name: Run tests
         run: flutter test --no-pub 2>&1 | tail -10
 
+      - name: Decode release keystore from CI secrets
+        # Release-engineering Task 4: only runs when the user has configured
+        # the RELEASE_* secrets in GitHub repo Settings. Never hardcode secret
+        # values here — this just materializes android/key.properties +
+        # upload-keystore.jks so gradle picks real signing (Task 1 fallback
+        # covers the no-secret case).
+        if: ${{ secrets.RELEASE_KEYSTORE_BASE64 != '' }}
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          echo "$RELEASE_KEYSTORE_BASE64" | base64 --decode > android/app/upload-keystore.jks
+          cat > android/key.properties <<EOF
+          storePassword=${RELEASE_STORE_PASSWORD}
+          keyPassword=${RELEASE_KEY_PASSWORD}
+          keyAlias=${RELEASE_KEY_ALIAS}
+          storeFile=upload-keystore.jks
+          EOF
+
       - name: Build debug APK
         id: build
         run: |
@@ -116,4 +137,30 @@ jobs:
         with:
           name: release-apk
           path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: warn
+
+      - name: Build release AAB
+        # Release-engineering Task 2: AAB for Play Console upload. Until the
+        # RELEASE_* CI secrets are configured (see checklist.md), there is no
+        # android/key.properties on the runner, so this signs with the DEBUG
+        # key (gradle fallback) — Play rejects debug-signed bundles; real
+        # signing activates automatically once secrets exist.
+        id: build-aab
+        run: |
+          flutter build appbundle --release --no-pub \
+            --dart-define=TEST_ADS=${{ inputs.test_ads || 'true' }} 2>&1 | tee build-aab-output.txt
+          echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+
+      - name: Fail if AAB build failed
+        if: steps.build-aab.outputs.exit_code != '0'
+        run: |
+          echo "AAB build failed with exit code ${{ steps.build-aab.outputs.exit_code }}"
+          exit 1
+
+      - name: Upload AAB artifact
+        if: steps.build-aab.outputs.exit_code == '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-aab
+          path: build/app/outputs/bundle/release/app-release.aab
           if-no-files-found: warn
