@@ -590,8 +590,9 @@ class StorageService {
           .toSet();
       if (ids.remove(appWidgetId)) {
         final joined = (ids.toList()..sort()).join(',');
+        // Single write: the Dart plugin auto-prefixes keys, so this lands as
+        // flutter.configured_widget_ids — exactly the key Kotlin reads back.
         await prefs.setString('configured_widget_ids', joined);
-        await prefs.setString('flutter.configured_widget_ids', joined);
       }
     } catch (_) {
       // Registry edit is best-effort.

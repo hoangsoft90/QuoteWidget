@@ -792,8 +792,12 @@ void main() {
       final prefs = await SharedPreferences.getInstance();
       expect(prefs.getString('configured_widget_ids'), '',
           reason: 'A3: registry must drop the id or the Free gate stays stuck');
-      expect(prefs.getString('flutter.configured_widget_ids'), '',
-          reason: 'flutter.-prefixed copy must stay in sync (Kotlin parity)');
+      // The Dart plugin auto-prefixes, so getString('configured_widget_ids')
+      // resolves through the physical flutter.configured_widget_ids — the
+      // exact key Kotlin reads back. One write covers both sides.
+      expect(prefs.getKeys().contains('flutter.flutter.configured_widget_ids'),
+          isFalse,
+          reason: 'no double-prefixed rubbish key may be written');
       expect(prefs.getString('wcfg_42_configId'), isNull);
       expect(prefs.getString('wcfg_${config.id}_appWidgetId'), isNull);
       expect(svc.getWidgetConfig(config.id), isNull);
@@ -837,7 +841,6 @@ void main() {
         configId: newConfig.id,
       );
       await prefs.setString('configured_widget_ids', '42');
-      await prefs.setString('flutter.configured_widget_ids', '42');
 
       expect(svc.getWidgetConfig(newConfig.id), isNotNull,
           reason: 'WidgetLimitReachedException NOT thrown → no Upgrade prompt');
