@@ -245,7 +245,29 @@
 
 - [ ] **Device test gate (Phase 4)** — chờ human tester chạy Wave 1–6 theo `.plan/device_qa_run_sheet.md` (agent không có thiết bị thật)
 - [ ] **Privacy URL live**: `https://hoangsoft90.github.io/QuoteWidget/privacy.html` — đã có `docs/privacy.html` + `pages.yml`, nhưng chưa verify URL resolving; cần enable GitHub Pages trong repo Settings
-- [ ] **Release prep** (nếu muốn upload Play Store): version bump, AAB artifact (CI hiện chỉ build APK), release signing key
+- [x] **Release prep** — release-engineering batch 2026-09-07 (commit `70deddb`): signing config fallback + CI AAB + decode-secrets step. Còn lại user: keytool keystore, key.properties local, 4 GitHub secrets, PAT revoke
+- [ ] **`70deddb` chưa push** — remote URL đã sạch PAT nên push cần user cấu hình credential mới (SSH key / fine-grained PAT)
+
+## Session 2026-09-07 — Final Hardening Batch
+
+- P0-1: `snapshot_manager.dart` — snapshot content-only (bỏ param `widgetConfigs`, BackupData luôn empty); `restoreFromSnapshot` restore `widgetConfigs: const []` → không phantom config. 2 caller cập nhật (deleteCollection, importBackup). 2 test mới PASS
+- P1-1: `collection_detail_screen.dart` — `_filterActive` guard + snackbar "Tắt tìm kiếm/lọc để sắp xếp lại thứ tự"; drag disabled khi filter (ReorderableDelayedDragStartListener chỉ khi enabled; handle disabled = IconButton). 3 widget test mới PASS
+- P1-2: `widget_service.dart` `_pinDailyItem` (index+item_id) + same-day revalidation (giữ pin khi delete item khác / repin giữ daily_date khi xóa item pin); Kotlin: native day-advance clear `daily_item_id` stale + onDeleted/onRestored dọn key mới. 3 test mới + extend 1 PASS
+- P1-3: `widget_setup_screen.dart` — `_bindWidget` (register→sync→update) try/catch → fail = `unbindWidgetConfig` rollback + snackbar lỗi; cả 2 flow `_save`/`_saveAndNavigateToDetail`; `_createConfig` tách riêng (limit→unlock giữ nguyên). 1 widget test mới PASS
+- P2-1: `duplicateCollection` copy `author` (1 test mới PASS)
+- P2-2: dead code verify — `widget_config_screen.dart` + `widget_preview.dart` đã xóa từ trước (ls/grep/git ls-files = 0; analyze sạch) — không cần sửa
+- P2-3: `add_widget_guide_screen.dart` — bỏ auto `_tryPinWidget` khỏi initState → `_probePinSupport` (isRequestPinWidgetSupported — không dialog); nút bấm mới request pin; xóa `_pinRequested`; `widget_service.isRequestPinSupported` mới. 1 widget test mới PASS
+- Gate: analyze 0 issue; **flutter test 170/170** (159 + 11). Commit local `fix(final-hardening)` — chưa push
+
+## Session 2026-09-07 — Release Engineering Batch
+
+- Bước 0: pull (up to date) + push 3 commit cleanup (`f54623f`, `1fff5bc`, `c29e1b5`) — origin/main in sync
+- Task 1: `android/key.properties.example` + signing fallback trong `build.gradle.kts` (không throw khi thiếu keystore)
+- Task 2: CI `Build release AAB` + `Upload AAB artifact` (dùng lại input `test_ads`, giữ APK steps)
+- Task 3: `git remote set-url` sạch token (verify: không còn pattern ghp_)
+- Task 4: CI decode-keystore step gated `secrets.RELEASE_KEYSTORE_BASE64` + checklist.md cập nhật
+- Gate: analyze 0 issue, test 159/159; gradle evaluate local BỎ (user chỉ định build trên CI; `/home` 95% full + symlink `~/.gradle` hỏng là constraint môi trường)
+- Blocks: git history — AGENTS.md cấm `commit --amend`/rewrite; signing file path chưa có pytest gradle để kiểm chứng local
 
 ## Files Modified (this session — Phase 4 prep)
 

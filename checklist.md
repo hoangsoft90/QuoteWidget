@@ -117,6 +117,16 @@
 - [x] Run sheet `.plan/device_qa_run_sheet.md` — metadata + đủ MUST A1–A6/B1–B3/C1–C4/D1–D2/E1–E4/F1–F5/G1–G2/H1–H2 + SHOULD I1–I5 + tick boxes + triage hints
 - [x] features_final.md sync (Phase 1–2B shipped → F4/F5 = MUST)
 
+### Final Hardening Batch (2026-09-07 — prompt_final_hardening_batch.md)
+- [x] **P0-1 — Snapshot không tạo phantom WidgetConfig** — `snapshot_manager.dart`: `createSnapshot` content-only (bỏ param `widgetConfigs`), `restoreFromSnapshot` restore với `widgetConfigs: const []`; 2 caller cập nhật (deleteCollection, importBackup). Snapshot FILE không còn chứa config (test assert file JSON). 2 test mới PASS (file content-only + config-unbound không resurrect)
+- [x] **P1-1 — Reorder an toàn khi Search/Favorites active** — `collection_detail_screen.dart`: `_filterActive` guard trong `handleReorder` + snackbar "Tắt tìm kiếm/lọc để sắp xếp lại thứ tự"; drag bị disable (bọc tile bằng `ReorderableDelayedDragStartListener` chỉ khi không filter; handle disabled = IconButton → snackbar). 3 test widget mới PASS
+- [x] **P1-2 — Daily lưu `daily_item_id`** — `widget_service.dart` `_pinDailyItem` (index + id); same-day revalidation (item còn → giữ id + re-derive index; item bị xóa → chọn lại giữ `daily_date`); Kotlin native day-advance clear id stale + `onDeleted`/`onRestored` dọn key `_daily_item_id`. 3 test mới + extend 1 test PASS
+- [x] **P1-3 — Widget setup rollback** — `widget_setup_screen.dart` `_bindWidget` bọc mapping→sync→update; fail → `unbindWidgetConfig` + snackbar lỗi; cả 2 flow (`_save`, `_saveAndNavigateToDetail`). 1 test widget mới PASS (config không còn sau sync fail + không còn key `wcfg_*` + snackbar)
+- [x] **P2-1 — Duplicate copy author** — `duplicateCollection` thêm `author: item.author`. 1 test mới PASS
+- [x] **P2-2 — Dead code verify** — `widget_config_screen.dart` + `widget_preview.dart` **đã xóa từ trước**: `ls` No such file, grep lib/ = 0 ref, git ls-files = 0, analyze 0 issue (không import gãy). features.md/checklist.md đã ghi đúng
+- [x] **P2-3 — AddWidgetGuide không auto-pin** — bỏ `_tryPinWidget()` khỏi initState → `_probePinSupport` (query support, không dialog); nút bấm mới request pin; xóa `_pinRequested`; `WidgetService.isRequestPinSupported` mới. 1 test widget mới PASS (0 request khi mở màn, đúng 1 khi bấm nút)
+- [x] **Gate** — `flutter analyze` 0 issue, **`flutter test` 170/170** (159 cũ + 11 mới). Commit local `fix(final-hardening)` — chưa push
+
 ### Review + QA candidate (2026-09-07)
 - [x] **Commit batch** — `c3b6f73` (35 files, +2285/−467) pushed to main; secret-scan sạch; session artifacts (handoffs/.project/skills-lock) cố tình không commit
 - [x] **CI push run 34074858578** — success (analyze → test → debug APK → release APK)
@@ -125,9 +135,9 @@
 - [x] **Cleanup `f54623f`** — analyze 0 issue, 155/155 tests (local; **chưa push** — no-op trên thiết bị, không bắt buộc build lại QA candidate)
 - [x] **Cleanup `1fff5bc` (mirror f54623f)** — `widget_data_bridge.dart`: bỏ write dư `flutter.is_pro_expires_at` (key rác `flutter.flutter.*`) + cắt term đọc chết trong `getProExpiry`; test mới `widget_data_bridge_test.dart` (4 test: contract key + cấm mọi key `flutter.flutter.*`) — analyze 0 issue, **159/159 tests** (local; **chưa push**)
 
-### Verification (current state — sau Feature Close Batch + cleanup)
+### Verification (current state — sau Final Hardening Batch)
 - [x] `flutter analyze` — 0 errors, 0 warnings
-- [x] `flutter test` — 159/159 All tests passed (138 gốc + 17 batch + 4 bridge-hygiene)
+- [x] `flutter test` — 170/170 All tests passed (138 gốc + 17 feature-close + 4 bridge-hygiene + 11 final-hardening)
 - [x] Dead code: `source/` gone, `widget_config_screen.dart`/`widget_preview.dart` deleted, 0 references
 - [x] CI green: debug APK + release APK artifact (push build) + QA candidate success (TEST_ADS=false, run 33972687792)
 - [x] Canonical feature spec `.plan/features_final.md` synced (Phase 1–2B ship, deferred ghi rõ)
@@ -188,4 +198,4 @@
 4. ~~Release signing pattern?~~ → ✅ config đã ship (Task 1, chuẩn key.properties của Flutter docs); còn lại việc tạo keystore + secrets là của user (4 bước trong section trên)
 5. **Privacy URL live** — verify `https://hoangsoft90.github.io/QuoteWidget/privacy.html` resolving?
 6. **Revoke PAT cũ** trên GitHub Settings → Developer settings (agent đã dọn token khỏi remote URL, nhưng token cũ vẫn còn hiệu lực cho tới khi bạn revoke)
-7. **Cấu hình credential mới để push** — sau khi dọn PAT khỏi remote URL (Task 3), `git push` cần SSH key hoặc fine-grained PAT mới; commit `70deddb` + `e1a0060` (release engineering + CI fix) đang local ahead 2
+7. **Cấu hình credential mới để push GỘP 4 commit** — sau khi dọn PAT khỏi remote URL (Task 3), `git push` cần SSH key hoặc fine-grained PAT mới; local ahead gồm `fix(final-hardening)` + docs + `70deddb` + `e1a0060` (hardening + release engineering)

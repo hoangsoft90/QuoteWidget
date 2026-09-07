@@ -1,0 +1,140 @@
+================================================================================
+result10.txt — FINAL HARDENING BATCH (trước Google Play)
+================================================================================
+Nguồn: .plan/prompt_final_hardening_batch.md — 2026-09-07
+Rule: chỉ ghi PASS khi có bằng chứng dòng code + kết quả test. Không tin lời.
+
+Gate cuối batch:
+  flutter analyze → No issues found!
+  flutter test    → 170/170 passed  (159 cũ + 11 test mới)
+
+--------------------------------------------------------------------------------
+P0-1 — Safety Snapshot restore tạo phantom WidgetConfig          → PASS
+--------------------------------------------------------------------------------
+File: lib/services/snapshot_manager.dart
+- createSnapshot() bỏ param `widgetConfigs`; BackupData.create luôn
+  `widgetConfigs: const []` → snapshot FILE không còn chứa config.
+  (lib/services/snapshot_manager.dart — createSnapshot)
+- restoreFromSnapshot() gọi restoreFromBackup với `widgetConfigs: const []`
+  (kể cả snapshot cũ vẫn nhúng config → không restore).
+- 2 caller cập nhật: storage_service.deleteCollection + backup_service.importBackup
+  bỏ `widgetConfigs: getAllWidgetConfigs()`.
+- KHÔNG chạm widget_<id>_* prefs, KHÔNG gọi reconcile sau snapshot-restore.
+- KHÔNG đụng key nào trong Shuffle Bag / rotation_service (theo cảnh báo đầu prompt).
+
+Test (test/restore_rollback_test.dart, group "Final Hardening P0-1"):
+  + "snapshot FILE carries no widget configs (content only)"  → PASS
+  + "restore after the config was unbound does NOT resurrect it":
+      tạo config → snapshot → unbind config → clearAll → restoreFromSnapshot
+      → collections/items đúng, getAllWidgetConfigs() == []  → PASS
+
+--------------------------------------------------------------------------------
+P1-1 — Reorder khi Search/Favorites active làm hỏng order        → PASS
+--------------------------------------------------------------------------------
+File: lib/screens/collection_detail_screen.dart
+- `_filterActive` getter = favoritesOnly || searchQuery.trim().isNotEmpty.
+- handleReorder() guard đầu hàm: nếu filter active → snackbar
+  "Tắt tìm kiếm/lọc để sắp xếp lại thứ tự" + return (không gọi reorderItems).
+- UI: buildDefaultDragHandles: false; item chỉ được bọc
+  ReorderableDelayedDragStartListener khi reorderEnabled; khi disable handle
+  là IconButton grey → snackbar giải thích. Item hiển thị bình thường.
+
+Test (test/collection_detail_filter_reorder_test.dart — mới, 3/3):
+  + search active → reorder no-ops + snackbar + 0 drag listeners → PASS
+  + favorites-only active → no-ops + snackbar, order giữ nguyên A,B,C → PASS
+  + no filter → reorder vẫn chạy (A,B,C → B,A,C) → PASS
+
+--------------------------------------------------------------------------------
+P1-2 — Daily rotation không lưu daily_item_id                     → PASS
+--------------------------------------------------------------------------------
+File: lib/services/widget_service.dart
+- Lưu `${prefix}_daily_item_id` (item ID) song song daily_index tại mọi chỗ
+  pin daily — helper mới `_pinDailyItem()` (index + id + currentIndex).
+- Same-day (daily_date == today):
+  + đọc daily_item_id → item còn tồn tại → GIỮ, chỉ refresh daily_index nếu
+    reorder làm lệch (index re-derived).
+  + item đã bị xóa → dailyIndexForToday(previousDailyId: oldId) chọn mới,
+    ghi đè daily_item_id + daily_index, GIỮ NGUYÊN daily_date.
+  + daily_item_id rỗng/absent (native tự advance / bản cũ) → không đụng.
+- daily_date quá khứ → native render advance (hành vi cũ, không đổi).
+
+File: android/.../QuoteWidgetProvider.kt
+- Native day-advance (resolveScheduleIndex, dailyDate != today) giờ ghi
+  `daily_item_id` = "" — xóa id stale của hôm qua để Flutter same-day
+  revalidation không hồi sinh nhầm item cũ (native không có id mapping).
+- onDeleted + onRestored: dọn thêm key `_daily_item_id` (cả 2 file prefs).
+
+Test (test/widget_service_test.dart):
+  + "daily schedule pins today + daily index + ITEM ID on first sync" (extend)
+  + P1-2 group "deleting ANOTHER item keeps today's pinned quote (id stable,
+    index re-derived)"  → PASS (pin C, xóa A → id=C, index 2→1, date giữ)
+  + "deleting today's pinned item re-pins a replacement (same date)" → PASS
+  + "a PAST daily_date is left to native rollover" → PASS
+
+--------------------------------------------------------------------------------
+P1-3 — Widget Setup không rollback khi bước sau create fail       → PASS
+--------------------------------------------------------------------------------
+File: lib/screens/widget_setup_screen.dart
+- `_bindWidget(config)`: registerWidgetMapping → syncWidgetData → updateWidget
+  bọc try/catch; catch → `storageService.unbindWidgetConfig(config.id)`
+  (dùng lại logic có sẵn — không viết xóa mới) → return false.
+- Cả 2 flow (`_save`, `_saveAndNavigateToDetail`): nếu !bound → _saving=false +
+  snackbar "Không thể thiết lập widget, vui lòng thử lại"; không navigate,
+  không báo thành công.
+- `_createConfig()` tách riêng (limit → null → unlock dialog giữ nguyên).
+
+Test (test/widget_setup_rollback_test.dart — mới, 1/1):
+  mock KHÔNG có home_widget channel → syncWidgetData throw sau khi config +
+  mapping đã ghi → assert getAllWidgetConfigs() rỗng, không còn key wcfg_*,
+  snackbar lỗi hiện  → PASS
+
+--------------------------------------------------------------------------------
+P2-1 — duplicateCollection() không copy author                    → PASS
+--------------------------------------------------------------------------------
+File: lib/services/storage_service.dart — duplicateCollection(): thêm
+`author: item.author` vào Item.create (cạnh copyItem.favorite).
+
+Test (test/storage_service_test.dart — "P2-1: duplicated items keep the author
+attribution"): item 'Thoreau' → duplicate → copied[0].author == 'Thoreau',
+item không author không bị gán nhầm  → PASS
+
+--------------------------------------------------------------------------------
+P2-2 — Xóa dead code (widget_config_screen + widget_preview)      → PASS (đã có)
+--------------------------------------------------------------------------------
+Bằng chứng (không sửa code — 2 file đã bị xóa ở batch trước):
+  ls lib/screens/widget_config_screen.dart  → No such file
+  ls lib/widgets/widget_preview.dart        → No such file
+  grep trong lib/ (import/reference)        → 0
+  git ls-files (tracked)                    → 0
+  flutter analyze                            → 0 issue (không import gãy)
+features.md + checklist.md đã ghi "ĐÃ XÓA" → đúng thật, không cần sửa.
+
+--------------------------------------------------------------------------------
+P2-3 — AddWidgetGuideScreen tự động pin khi mở màn                → PASS
+--------------------------------------------------------------------------------
+File: lib/screens/add_widget_guide_screen.dart
+- initState bỏ `_tryPinWidget();` → thay bằng `_probePinSupport()` (query
+  support thuần — KHÔNG dialog).
+- Nút "Add Widget to Home Screen" hiện khi device hỗ trợ (probe), bấm nút mới
+  gọi `_tryPinWidget()` (requestPinWidget → dialog) — hành vi bấm giữ nguyên.
+- Bỏ field `_pinRequested` thừa.
+File: lib/services/widget_service.dart — thêm `isRequestPinSupported()`
+  (HomeWidget.isRequestPinWidgetSupported, không dialog).
+
+Test (test/add_widget_guide_pin_test.dart — mới, 1/1):
+  mở màn → KHÔNG có 'requestPinWidget' trong calls (chỉ probe) → bấm nút →
+  requestPinWidget gọi đúng 1 lần  → PASS
+
+--------------------------------------------------------------------------------
+Tổng kết
+--------------------------------------------------------------------------------
+- Code: 8 file lib/ + 1 file Kotlin sửa; 3 test file mới + 3 test file mở rộng.
+- Tests: 170/170 PASS (159 cũ không vỡ + 11 mới); analyze 0 issue.
+- Commit: fix(final-hardening) — local (chưa push).
+- Giới hạn trung thực: Kotlin không build-verified local (môi trường hạn chế;
+  chỉ định build trên CI) — lần dispatch CI sau push là phép kiểm chứng; hành
+  vi native daily_item_id chờ device QA Wave 5 (F5 daily).
+
+Next (theo prompt): push gộp hardening + release-engineering (70deddb, e1a0060)
+khi có credential mới từ user → CI chạy thật lần đầu → Device QA Wave 1-6.
+================================================================================
