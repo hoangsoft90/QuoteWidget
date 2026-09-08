@@ -171,7 +171,7 @@
 - [ ] **Cần user làm (không thể agent tự làm):**
   1. ~~Tạo keystore thật~~ — ✅ ĐÃ LÀM 2026-09-08: `android/app/upload-keystore.jks` (PKCS12, RSA 2048, alias `upload`, validity 10000d) đã sinh bằng keytool; verify 1 entry; `android/key.properties` đã điền (cả 2 file gitignored — `git check-ignore` pass)
   2. ~~Điền `android/key.properties` thật~~ — ✅ ĐÃ LÀM (cùng lúc, local only, không commit) — password được giao cho user qua chat để set secrets
-  3. Thêm 4 secret vào GitHub repo → Settings → Secrets and variables → Actions: `RELEASE_KEYSTORE_BASE64` (nội dung `.jks` encode base64), `RELEASE_STORE_PASSWORD`, `RELEASE_KEY_ALIAS` (= `upload`), `RELEASE_KEY_PASSWORD`
+  3. ~~Thêm 4 secret vào GitHub repo~~ — ✅ ĐÃ LÀM 2026-09-08 qua `gh secret set` (đọc trực tiếp từ `android/key.properties` + base64 từ `.jks`, không echo giá trị) — `gh secret list` verify đủ 4: `RELEASE_KEYSTORE_BASE64`, `RELEASE_STORE_PASSWORD`, `RELEASE_KEY_ALIAS`, `RELEASE_KEY_PASSWORD`. Bước còn lại: dispatch CI `test_ads=false` → AAB ký release thật.
   4. Sau khi secrets có: dispatch CI → AAB artifact `release-aab` sẽ ký bằng key thật, upload được Play Console (Closed Testing)
   - Ghi chú: cho tới khi secrets được cấu hình, AAB trong CI ký debug key → Play sẽ từ chối upload; APK QA candidate vẫn dùng như cũ
 
