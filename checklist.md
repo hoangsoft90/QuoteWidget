@@ -169,8 +169,8 @@
 - [x] **Release signing config** — ✅ ĐÃ SHIP (Task 1): `android/app/build.gradle.kts` đọc `android/key.properties` nếu tồn tại, fallback debug signing + warning nếu không (CI/build local không bao giờ fail); template `android/key.properties.example` đã commit; thật `key.properties`/`upload-keystore.jks` bị gitignore (root + android)
 - [x] **CI keystore decode step** — ✅ ĐÃ SHIP (Task 4): step `Decode release keystore from CI secrets` decode base64 → `android/app/upload-keystore.jks` + sinh `android/key.properties` trên runner. **Lưu ý (fix `e1a0060` sau review):** gate bằng `if: secrets.X != ''` là KHÔNG đáng tin (GitHub docs: secrets không dùng được trong `if:`) → step luôn chạy, gate nằm TRONG script qua env (`[ -z "$RELEASE_KEYSTORE_BASE64" ] → exit 0`), secrets được wire qua step-level `env:`
 - [ ] **Cần user làm (không thể agent tự làm):**
-  1. Tạo keystore thật: `keytool -genkey -v -keystore upload-keystore.jks -keyalg RSA -keysize 2048 -validity 10000 -alias upload` (lưu password an toàn, không gửi qua chat)
-  2. Điền `android/key.properties` thật trên máy local (dùng `.example` làm mẫu) — không commit
+  1. ~~Tạo keystore thật~~ — ✅ ĐÃ LÀM 2026-09-08: `android/app/upload-keystore.jks` (PKCS12, RSA 2048, alias `upload`, validity 10000d) đã sinh bằng keytool; verify 1 entry; `android/key.properties` đã điền (cả 2 file gitignored — `git check-ignore` pass)
+  2. ~~Điền `android/key.properties` thật~~ — ✅ ĐÃ LÀM (cùng lúc, local only, không commit) — password được giao cho user qua chat để set secrets
   3. Thêm 4 secret vào GitHub repo → Settings → Secrets and variables → Actions: `RELEASE_KEYSTORE_BASE64` (nội dung `.jks` encode base64), `RELEASE_STORE_PASSWORD`, `RELEASE_KEY_ALIAS` (= `upload`), `RELEASE_KEY_PASSWORD`
   4. Sau khi secrets có: dispatch CI → AAB artifact `release-aab` sẽ ký bằng key thật, upload được Play Console (Closed Testing)
   - Ghi chú: cho tới khi secrets được cấu hình, AAB trong CI ký debug key → Play sẽ từ chối upload; APK QA candidate vẫn dùng như cũ
