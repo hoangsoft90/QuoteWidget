@@ -118,11 +118,10 @@
 1. **Pro status row** (động): `Free (1 Widget)` / `Pro unlocked — Xh left` (24h) / `Pro (Lifetime)` (legacy purchasers). Tap khi free → xem rewarded ad unlock 24h.
 2. **Recently Deleted** → màn hình trash.
 3. **Backup & Restore** → export/import/snapshots.
-4. **Privacy Policy** — mở `https://hoangsoft90.github.io/QuoteWidget/privacy.html` (url_launcher, external). File `docs/privacy.html` + workflow `pages.yml` deploy trên GitHub Pages (chưa verify URL live).
-5. **About** — "Quote Widget – Your Words v<version>" — version đọc live từ `PackageInfo` (package_info_plus; Feature Close B5).
-6. **Privacy Options** (UMP A2) — chỉ hiện khi Google yêu cầu entry point cho user/region đó; mở form consent để user xem/thay đổi.
-7. **Export/Import 1 collection** (B2) — từ AppBar menu của Collection Detail: xuất 1 collection + items ra `.json` (share sheet), import file `.json` với confirm (New collection / Add here).
-8. **Share quote as image** (B3) — menu từng item → card PNG (text + author + app name) qua share_plus.
+4. **About** — "Quote Widget – Your Words v<version>" — version đọc live từ `PackageInfo` (package_info_plus; Feature Close B5).
+5. **Privacy Options** (UMP A2) — chỉ hiện khi Google yêu cầu entry point cho user/region đó; mở form consent để user xem/thay đổi.
+6. **Export/Import 1 collection** (B2) — từ AppBar menu của Collection Detail: xuất 1 collection + items ra `.json` (share sheet), import file `.json` với confirm (New collection / Add here).
+7. **Share quote as image** (B3) — menu từng item → card PNG (text + author + app name) qua share_plus.
 
 > **2026-09-04:** Toàn bộ tính năng purchase đã gỡ (Remove Ads Forever + Restore Purchases + dependency `in_app_purchase`). Monetization chỉ còn rewarded-ad 24h. Pro **không** ẩn ads nữa.
 

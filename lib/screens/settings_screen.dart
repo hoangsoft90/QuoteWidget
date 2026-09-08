@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../services/backup_service.dart';
 import '../services/iap_service.dart';
 import '../services/interstitial_ad_service.dart';
@@ -103,15 +102,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  Future<void> _openPrivacyPolicy() async {
-    // Hosted on GitHub Pages of the QuoteWidget repo — static, versioned in git.
-    final url = Uri.parse(
-        'https://hoangsoft90.github.io/QuoteWidget/privacy.html');
-    if (await canLaunchUrl(url)) {
-      await launchUrl(url, mode: LaunchMode.externalApplication);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final isPro = widget.iapService.isPro;
@@ -195,15 +185,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
 
           const Divider(),
-
-          // Privacy Policy (required for Google Play)
-          ListTile(
-            leading: const Icon(Icons.privacy_tip_outlined),
-            title: const Text('Privacy Policy'),
-            subtitle: const Text('How we handle your data'),
-            trailing: const Icon(Icons.open_in_new, size: 18),
-            onTap: _openPrivacyPolicy,
-          ),
 
           // Privacy Options (UMP A2) — only when Google requires the entry
           // point; lets the user review/withdraw ads consent at any time.
