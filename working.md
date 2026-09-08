@@ -7,6 +7,21 @@
 **Gate:** QA candidate build `dbd4481` / run 33972687792 `TEST_ADS=false` = ✅ success (release APK 30.6 MB) — verdict **CLOSED_TESTING_OK chỉ sau khi human tester PASS hết MUST** (hiện vẫn BLOCKED)
 **Lưu ý:** `.project/ai-rules.md` memory system được tạo trong session này — đọc file đó làm quy tắc; memory dump của session này trong `.project/memory/session-20260905-165532.json` (format: `session-YYYYMMDD-NNNNNN.json`)
 
+### [2026-09-08] Play Store prep — privacy page + store assets
+- **Privacy page:** `store_assets/privacy-policy.html` (email haibasoftware@gmail.com,
+  no repo mention) → pushed orphan branch `gh-pages` → Pages live
+  `https://hoangsoft90.github.io/QuoteWidget/` (HTTP 200 verified).
+  `docs/privacy.html` synced to same content; stale `pages.yml` (docs/ artifact
+  deploy — would overwrite gh-pages source) removed. Checklist item resolved.
+- **chplay.md:** full Play listing (ASO name/short/full desc, category+5 tags,
+  graphics briefs, content checklist). Published to Jotbird:
+  `https://share.jotbird.com/curious-serene-mesa-willow` (expires 2026-12-07;
+  13 old docs deleted with user approval to fit Free 10-doc cap).
+- **Assets:** `store_assets/icon.png` (512×512, opaque, from launcher xxxhdpi),
+  `store_assets/feature_graphic.png` (1024×500, brand #6750A4→#4C3A80 gradient,
+  title + widget mockup + badge), generator `store_assets/make_assets.py`.
+- **Gate:** analyze 0 issues; 172/172 tests. No app code touched.
+
 ### [2026-09-05] prompt_device_qa — Phase 4 Device QA prep
 - **Preflight PASS:** analyze 0 issues; `flutter test` 138/138 (15 test files); `source/` gone;
   `widget_config_screen.dart`/`widget_preview.dart` deleted, 0 references.

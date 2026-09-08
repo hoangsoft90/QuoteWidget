@@ -160,8 +160,8 @@
 - [ ] **CLOSED_TESTING_OK verdict** chỉ có sau khi tất cả MUST PASS (hoặc N/A khi feature chưa ship — nhưng F4/F5 đã ship)
 
 ### Release prep (trước wide)
-- [ ] **GitHub Pages** — enable repo Settings → Pages → Source: GitHub Actions (để privacy URL `https://hoangsoft90.github.io/QuoteWidget/privacy.html` resolving) — đã có `docs/privacy.html` + workflow pages.yml
-- [ ] **Privacy URL live verify**: kiểm tra `https://hoangsoft90.github.io/QuoteWidget/privacy.html` có trả về page không (agent ghi vào plan nhưng chưa verify URL live)
+- [x] **GitHub Pages** — ✅ 2026-09-08: Pages đã BẬT, source = branch `gh-pages` (orphan, chỉ chứa index.html). API verify: status=built, source={branch: gh-pages, path: /}. Trang cũ `docs/privacy.html` không đủ (thiếu email liên hệ) → đã sync nội dung mới vào `docs/` + `store_assets/privacy-policy.html` (1 nguồn, email haibasoftware@gmail.com); `pages.yml` (deploy docs/ qua Actions — sẽ ghi đè nhánh gh-pages) đã xóa để không xung đột source.
+- [x] **Privacy URL live verify**: ✅ `https://hoangsoft90.github.io/QuoteWidget/` HTTP 200 + title "Privacy Policy — Your Words" (curl 2026-09-08). URL dán vào Play Console.
 
 ### Release signing / AAB / version (nếu cần upload Play Store)
 - [ ] **Version bump** — bạn muốn versionName+versionCode là bao nhiêu trước production (vd 1.0.0 → 1.0.1 / 1.1.0)?
