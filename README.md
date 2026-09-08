@@ -18,9 +18,9 @@ reminders, notes). Offline-first, ad-supported (banner + rewarded 24h unlock).
 
 - **Never build APKs locally** — GitHub Actions builds on push
   (`.github/workflows/build-debug-apk.yml`: analyze, tests, debug + release APK).
-- Production build (real ads):
-  `flutter build appbundle --release --dart-define=TEST_ADS=false`
-- Dev builds keep `TEST_ADS=true` (sample ad units by default).
+- **Real ads are the default** (`TEST_ADS` default `false` in `ad_config.dart`,
+  2026-09-08). Dev/test builds wanting sample units:
+  `flutter build appbundle --release --dart-define=TEST_ADS=true`
 
 ## Tests
 

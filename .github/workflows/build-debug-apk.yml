@@ -5,14 +5,13 @@ on:
     branches: [master, main]
   workflow_dispatch:
     inputs:
-      # Device-QA gate (Phase 4): manual dispatch lets QA build the release
-      # candidate with PRODUCTION ad units (TEST_ADS=false) for MUST cases
-      # C1/H1 — without any local build. Push builds keep defaulting to test
-      # ads (expression falls back to 'true' when inputs is empty).
+      # Real ads are the code default (TEST_ADS=false in ad_config.dart) since
+      # 2026-09-08; this input only lets a manual dispatch force TEST ads for
+      # safe dev/QA builds (expression falls back to 'false' when empty).
       test_ads:
         description: 'Use Google test ad unit IDs (true) or production units (false)'
         type: boolean
-        default: true
+        default: false
 
 jobs:
   build:
@@ -120,7 +119,7 @@ jobs:
         id: build-release
         run: |
           flutter build apk --release --no-pub \
-            --dart-define=TEST_ADS=${{ inputs.test_ads || 'true' }} 2>&1 | tee build-release-output.txt
+            --dart-define=TEST_ADS=${{ inputs.test_ads || 'false' }} 2>&1 | tee build-release-output.txt
           echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
 
       - name: Show release build output
@@ -153,7 +152,7 @@ jobs:
         id: build-aab
         run: |
           flutter build appbundle --release --no-pub \
-            --dart-define=TEST_ADS=${{ inputs.test_ads || 'true' }} 2>&1 | tee build-aab-output.txt
+            --dart-define=TEST_ADS=${{ inputs.test_ads || 'false' }} 2>&1 | tee build-aab-output.txt
           echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
 
       - name: Fail if AAB build failed

@@ -18,13 +18,12 @@ class AdConfig {
   static const bool enabled =
       bool.fromEnvironment('ENABLE_ADS', defaultValue: true);
 
-  /// Test-ads mode — ON by default (user decision 2026-09-03): every ad unit
-  /// resolves to Google's official sample/test ID so ads always fill during
-  /// development and the AdMob account is never flagged/limited by the
-  /// anti-fraud systems while testing. Flip to real ads with
-  /// `--dart-define=TEST_ADS=false` once the units are live in the console.
+  /// Test-ads mode — OFF by default (user decision 2026-09-08): every build
+  /// serves the REAL ad unit IDs below. For safe dev/test builds that never
+  /// risk AdMob account limits, flip back to sample units with
+  /// `--dart-define=TEST_ADS=true`.
   static const bool testAds =
-      bool.fromEnvironment('TEST_ADS', defaultValue: true);
+      bool.fromEnvironment('TEST_ADS', defaultValue: false);
 
   /// Real (production) ad unit IDs — registered for com.quotewidget.quotewidget.
   static const String _androidBanner = 'ca-app-pub-6917313063209470/1409128007';

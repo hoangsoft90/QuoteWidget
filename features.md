@@ -137,7 +137,7 @@
 
 **Config (`AdConfig`):**
 - `ENABLE_ADS=true` (default) — tắt ads bằng `--dart-define=ENABLE_ADS=false`.
-- `TEST_ADS=true` (default) — mọi unit ID resolve về sample ID của Google (không bị AdMob giới hạn khi test). Bật ads thật: `--dart-define=TEST_ADS=false`.
+- `TEST_ADS=false` (default từ 2026-09-08) — mọi build mặc định dùng **unit ID thật** (banner/interstitial/rewarded). Build test an toàn: `--dart-define=TEST_ADS=true` (sample ID của Google).
 - App ID thật trong manifest (`ca-app-pub-6917313063209470~9587990603`); **cả 3 unit ID real** trong code — rewarded `ca-app-pub-6917313063209470/7613467914` đã đăng ký & thay thế (plan6 C4, 2026-09-05), khác sample ID `_testRewarded`.
 - `nonPersonalizedExtras = {'npa': '1'}` — quảng cáo không cá nhân hóa.
 

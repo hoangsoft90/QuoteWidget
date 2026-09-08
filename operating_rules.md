@@ -42,10 +42,11 @@
 
 ## Release runbook (Phase 1 P0-5)
 
-- Production build (real ads, real rewarded ID):
-  `flutter build appbundle --release --dart-define=TEST_ADS=false`
-- Dev / test builds keep the default `TEST_ADS=true` (sample ad units — never
-  risk AdMob account limits during development).
+- **Real ads are the code default** (user decision 2026-09-08 —
+  `TEST_ADS` default `false` in `ad_config.dart`): mọi build không truyền
+  flag đều dùng unit ID thật (banner/interstitial/rewarded).
+- Dev / test builds muốn dùng sample units an toàn:
+  `flutter build appbundle --release --dart-define=TEST_ADS=true`.
 - `ENABLE_ADS=false` ships an ad-free build (master switch).
 - No-fill UX: rewarded fail → "No ad available. Try again." dialog + retry
   (never silent fail); interstitial cooldown 5 min; non-personalized requests.
@@ -88,8 +89,9 @@
   unsure, ask the user instead of suppressing.
 - Do not REMOVE INTERNET permission (required by google_mobile_ads — ads are
   the primary monetization path; app data itself stays offline-first)
-- Do not disable TEST_ADS for normal dev builds (real units → AdMob can limit
-  the account; flip with --dart-define=TEST_ADS=false only for release testing)
+- TEST_ADS default = false (real units) từ 2026-09-08 theo yêu cầu user — nếu
+  cần build test an toàn (không đụng AdMob limit), truyền
+  `--dart-define=TEST_ADS=true`; không tự ý đổi ngược default mà không hỏi
 - Do not build APKs locally — builds run on GitHub Actions only
 - Do not use `share_handler` package (unmaintained, custom bridge is sufficient)
 - Do not auto-configure Pro widgets (all widgets start with "Tap to set up")
